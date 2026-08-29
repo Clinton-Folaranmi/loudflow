@@ -17,7 +17,8 @@ struct SettingsView: View {
             triggerGrid
             toggleCard
             retentionCard
-            transcriptionCard          // new — the API key lives here (and in onboarding)
+            speakersCard              // voice profiles — no toggle, this is how recording works
+            transcriptionCard         // the API key lives here (and in onboarding)
         }
     }
 
@@ -56,11 +57,15 @@ struct SettingsView: View {
 
     // MARK: Toggles
 
-    private struct OptionRow { let title: String; let hint: String; let keyPath: WritableKeyPath<DictationOptions, Bool> }
+    /// Two switches, written out rather than generated — these are labels, not data.
+    ///
+    /// There is no `Add punctuation` here any more: punctuation, paragraph breaks, and readable
+    /// numbers come from the ASR model itself, so there is nothing to opt out of. And there is
+    /// no sounds switch: the three earcons are simply on.
+    private struct OptionRow { let title: String; let keyPath: WritableKeyPath<DictationOptions, Bool> }
     private let optionRows: [OptionRow] = [
-        .init(title: "Type it into whatever field I'm in", hint: "Off means it only lands on the clipboard.", keyPath: \.insert),
-        .init(title: "Keep the audio, not just the text", hint: "So you can hear what you actually said.", keyPath: \.keep),
-        .init(title: "Add punctuation", hint: "Commas and full stops. No rephrasing, ever.", keyPath: \.punct),
+        .init(title: "Type it into whatever field I'm in", keyPath: \.insert),
+        .init(title: "Keep the audio", keyPath: \.keep),
     ]
 
     private var toggleCard: some View {
@@ -105,15 +110,228 @@ struct SettingsView: View {
             Text(model.retention.settingsNote)
                 .font(Typo.font(12.5, 400))
                 .foregroundColor(Theme.marigoldInk)
+                .lineSpacing(12.5 * 0.5)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.cardSmall).fill(Theme.cream))
     }
 
-    // MARK: Transcription (new)
+    // MARK: Speakers
+
+    /// No toggle. Two-track capture is how the app records, not a preference — so this card
+    /// only explains what happens and lists the voices it has met.
+    private var speakersCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 9) {
+                SolarIcon(name: Solar.speakers, size: 18, color: Theme.marigoldInk)
+                Text("Speakers").font(Typo.font(15, 800)).foregroundColor(Theme.creamInk)
+            }
+            Text("When a recording has more than one voice, LoudFlow labels each one. Voices you've named are recognised the next time they turn up.")
+                .font(Typo.font(12.5, 400))
+                .foregroundColor(Theme.creamBody)
+                .lineSpacing(12.5 * 0.45)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Recognition runs on this Mac, but the model has to arrive from somewhere once.
+            // The app says so rather than quietly reaching for the network.
+            if let note = recognizerNote {
+                Text(note)
+                    .font(Typo.font(12, 400))
+                    .foregroundColor(Theme.creamMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            FlowLayout(spacing: 7) {
+                ForEach(model.voices.listed) { voice in
+                    VoicePill(model: model, voice: voice, renaming: $renamingVoice)
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.cardSmall).fill(Theme.cream))
+    }
+
+    @State private var renamingVoice: Int?
+
+    /// What the Speakers card says about the on-device recogniser, if anything.
+    private var recognizerNote: String? {
+        switch model.recognizer.readiness {
+        case .preparing:
+            return "Fetching the voice model…"
+        case .unavailable:
+            return "Couldn't fetch the voice model, so voices won't be recognised on their own yet. Naming one still works."
+        case .idle, .ready:
+            return "Matching a voice to one you've named runs on this Mac. The model it needs downloads once, the first time you name someone."
+        }
+    }
+
+    // MARK: Transcription
 
     private var transcriptionCard: some View { TranscriptionCard(model: model) }
+}
+
+// MARK: - Voice pill
+
+/// A voice as a pill, not a full-width row: **play · name · pen · Forget**.
+private struct VoicePill: View {
+    @ObservedObject var model: AppModel
+    let voice: Voice
+    @Binding var renaming: Int?
+
+    @State private var draft = ""
+    @State private var penHovering = false
+    @State private var playHovering = false
+    @FocusState private var focused: Bool
+
+    private var isRenaming: Bool { renaming == voice.id }
+    private var isPlaying: Bool { model.playingVoiceId == voice.id }
+    /// A sample is only kept once a voice has been named, so there is nothing to hear before.
+    private var canPlay: Bool { voice.isNamed && model.voices.sampleURL(for: voice.id) != nil }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            playButton
+
+            if isRenaming {
+                nameField
+            } else {
+                Text(voice.settingsLabel)
+                    .font(Typo.font(13, 700))
+                    .foregroundColor(voice.isNamed ? Theme.creamInk : Theme.creamMuted)
+                    .padding(.horizontal, 2)
+
+                // You is never renamed and never forgotten.
+                if !voice.isYou {
+                    penButton
+                    if voice.isNamed {
+                        Button { model.forgetVoice(voice.id) } label: {
+                            Text("Forget")
+                                .font(Typo.font(11.5, 700))
+                                .foregroundColor(Theme.creamMuted)
+                                .padding(.horizontal, 5)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Forget this voice")
+                    }
+                }
+            }
+        }
+        .padding(5)
+        .background(Capsule().fill(Theme.card))
+        .overlay(Capsule().stroke(isRenaming ? Theme.marigold : Theme.creamLine2, lineWidth: 1.5))
+    }
+
+    /// Plays the voice's stored two seconds, so you can confirm the match.
+    private var playButton: some View {
+        Button { model.toggleVoiceSample(voice.id) } label: {
+            ZStack {
+                Circle().fill(isPlaying ? Theme.marigold
+                              : (playHovering && canPlay ? Theme.marigold : Theme.sagePale))
+                SolarIcon(name: isPlaying ? Solar.pause : Solar.play, size: 10,
+                          color: isPlaying ? Theme.creamInk : Theme.sageDeep)
+            }
+            .frame(width: 20, height: 20)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canPlay)
+        .onHover { playHovering = $0 }
+        .help(canPlay ? "Hear \(voice.name ?? "")" : "Name this voice to keep a sample")
+    }
+
+    private var penButton: some View {
+        Button {
+            draft = voice.name ?? ""
+            renaming = voice.id
+            focused = true
+        } label: {
+            ZStack {
+                Circle().fill(penHovering ? Theme.marigold : Theme.creamChip)
+                SolarIcon(name: Solar.pen, size: 10, color: Theme.marigoldInk)
+            }
+            .frame(width: 20, height: 20)
+        }
+        .buttonStyle(.plain)
+        .onHover { penHovering = $0 }
+        .help(voice.isNamed ? "Rename this voice" : "Name this voice")
+    }
+
+    private var nameField: some View {
+        TextField("Type a name", text: $draft)
+            .textFieldStyle(.plain)
+            .font(Typo.font(13, 700))
+            .foregroundColor(Theme.creamInk)
+            .focused($focused)
+            .frame(width: 110)
+            .padding(.horizontal, 9).padding(.vertical, 2)
+            .background(Capsule().fill(Theme.marigoldPale))
+            .overlay(Capsule().stroke(Theme.marigold, lineWidth: 1.5))
+            .onSubmit {
+                let name = draft.trimmingCharacters(in: .whitespaces)
+                renaming = nil
+                guard !name.isEmpty else { return }        // empty keeps the old name
+                model.renameVoice(voice.id, to: name, from: nil)
+            }
+            .onExitCommand { renaming = nil }
+            .onAppear { focused = true }
+    }
+}
+
+/// Wraps its children onto as many rows as they need. Voice pills are all different widths, so
+/// a fixed grid would either clip a long name or leave gaps after a short one.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 7
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let offered = proposal.width ?? .infinity
+        let rows = layout(subviews, in: offered)
+        let height = rows.last.map { $0.y + $0.height } ?? 0
+        // Never hand back an infinite width — an unbounded proposal has to resolve to the
+        // widest row, or AppKit ends up laying out a view with no finite frame.
+        let natural = rows.map(\.width).max() ?? 0
+        return CGSize(width: offered.isFinite ? offered : natural, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for row in layout(subviews, in: bounds.width) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: bounds.minY + row.y),
+                                      proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+        }
+    }
+
+    private struct Row { var indices: [Int] = []; var y: CGFloat = 0; var height: CGFloat = 0; var width: CGFloat = 0 }
+
+    private func layout(_ subviews: Subviews, in proposedWidth: CGFloat) -> [Row] {
+        let width = proposedWidth.isFinite ? proposedWidth : .greatestFiniteMagnitude
+        var rows: [Row] = []
+        var row = Row()
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                row.y = y; row.width = x - spacing
+                rows.append(row)
+                y += row.height + spacing
+                row = Row(); x = 0
+            }
+            row.indices.append(index)
+            row.height = max(row.height, size.height)
+            x += size.width + spacing
+        }
+        if !row.indices.isEmpty {
+            row.y = y; row.width = max(0, x - spacing)
+            rows.append(row)
+        }
+        return rows
+    }
 }
 
 // MARK: - Trigger card

@@ -10,13 +10,31 @@ enum TranscriberError: Error {
     case decoding          // unexpected response body
 }
 
+/// What a provider gives back.
+///
+/// `turns` is nil when only one voice was heard — that clip is a note and lives entirely in
+/// `text`. When there are two or more, `speaker` holds a **local** index: 0 is always the
+/// microphone track (you), and the other side starts at 1. `AppModel` maps those onto stored
+/// voice ids before the clip is saved.
+struct TranscriptionResult {
+    var text: String
+    var turns: [Turn]?
+
+    static func plain(_ text: String) -> TranscriptionResult { .init(text: text, turns: nil) }
+}
+
 /// A cloud transcription backend. Deepgram is the shipping default; Whisper is an adapter.
 ///
-/// Contract: return the **raw** transcript text only. No punctuation, capitalization, or
-/// cleanup happens here — that single optional transform lives in `AppModel.punctuate`.
+/// Contract: return the provider's own **formatted** output — punctuation, paragraph breaks at
+/// natural pauses, and number/date/currency formatting are the model's, not a rewrite, so they
+/// are always on and there is nothing to opt out of. What never happens, here or anywhere else
+/// in the app, is **rewording**: no tone presets, no LLM cleanup.
 protocol Transcriber {
-    /// Upload the audio file and return its raw transcript.
-    func transcribe(_ audioURL: URL) async throws -> String
+    /// Upload the audio file and return its transcript.
+    ///
+    /// `twoTrack` says the file has the microphone on channel 0 and system audio on channel 1,
+    /// so the provider can be asked to keep the channels apart instead of guessing who is who.
+    func transcribe(_ audioURL: URL, twoTrack: Bool) async throws -> TranscriptionResult
     /// Cheap best-effort check that the stored key is accepted.
     func validateKey() async -> Bool
 }

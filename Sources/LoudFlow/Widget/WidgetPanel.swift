@@ -19,7 +19,12 @@ final class WidgetPanelController {
     private var anchorRight = true
     private var dragStartOrigin: NSPoint?
 
-    private let edgeMargin: CGFloat = 2
+    /// The design's snap inset is 26pt from the screen edge, measured to the *visible* pill.
+    /// `WidgetView` carries a transparent margin so its shadow never clips, so the window sits
+    /// that much further out than the pill does — subtract it back off.
+    private let snapInset: CGFloat = 26
+    private let shadowPad: CGFloat = 14
+    private var edgeMargin: CGFloat { snapInset - shadowPad }
 
     init(model: AppModel) {
         self.model = model
@@ -118,20 +123,31 @@ final class WidgetPanelController {
         let frame = panel.frame
         let edge = nearestEdge(of: frame, in: vf)
 
+        // The cross axis is clamped to the same inset, so a widget dropped in a corner ends up
+        // neatly inset rather than jammed against two edges at once.
         switch edge {
         case .left:
             anchorRight = false
-            anchor = NSPoint(x: vf.minX + edgeMargin, y: frame.minY)
+            anchor = NSPoint(x: vf.minX + edgeMargin, y: clampY(frame, in: vf))
         case .right:
             anchorRight = true
-            anchor = NSPoint(x: vf.maxX - edgeMargin, y: frame.minY)
+            anchor = NSPoint(x: vf.maxX - edgeMargin, y: clampY(frame, in: vf))
         case .bottom:
             anchorRight = frame.midX > vf.midX
-            anchor = NSPoint(x: anchorRight ? frame.maxX : frame.minX, y: vf.minY + edgeMargin)
+            let x = clampX(frame, in: vf)
+            anchor = NSPoint(x: anchorRight ? x + frame.width : x, y: vf.minY + edgeMargin)
         }
         bindRootView()                          // flip layout to expand inward
         applyFrame(size: frame.size, animated: true)
         if let a = anchor { Preferences.widgetOrigin = CGPoint(x: a.x, y: a.y) }
+    }
+
+    private func clampY(_ frame: NSRect, in vf: NSRect) -> CGFloat {
+        min(max(frame.minY, vf.minY + edgeMargin), vf.maxY - frame.height - edgeMargin)
+    }
+
+    private func clampX(_ frame: NSRect, in vf: NSRect) -> CGFloat {
+        min(max(frame.minX, vf.minX + edgeMargin), vf.maxX - frame.width - edgeMargin)
     }
 
     /// Nearest of the three dockable edges to the widget's center.

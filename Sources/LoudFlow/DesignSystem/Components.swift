@@ -206,3 +206,108 @@ struct ProgressTrack: View {
         .frame(height: height)
     }
 }
+
+// MARK: - Spinning ring (in-row transcribing)
+
+/// A 12px ring with one lit edge, turning once every 0.7s. Replaces the indeterminate
+/// `ProgressView()` in a clip row, which read as a system control rather than as this app.
+struct SpinRing: View {
+    var size: CGFloat = 12
+    var lineWidth: CGFloat = 2
+    var track: Color = Theme.sagePale
+    var lit: Color = Theme.sage
+
+    @State private var spinning = false
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(track, lineWidth: lineWidth)
+            // A quarter turn of colour, starting at the top — the CSS `border-top-color` look.
+            Circle()
+                .trim(from: 0, to: 0.25)
+                .stroke(lit, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: size, height: size)
+        .rotationEffect(.degrees(spinning ? 360 : 0))
+        .animation(.linear(duration: 0.7).repeatForever(autoreverses: false), value: spinning)
+        .onAppear { spinning = true }
+    }
+}
+
+// MARK: - Filter chip (Library)
+
+/// `All` · `Notes` · `Meetings`. Active is a marigold fill; inactive is an outline, so only one
+/// chip ever carries the signal colour.
+struct FilterChip: View {
+    let title: String
+    let active: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Typo.font(12.5, 700))
+                .foregroundColor(active ? Theme.creamInk : Theme.body)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule().fill(active ? Theme.marigold : .clear)
+                )
+                .overlay(
+                    Capsule().stroke(active ? .clear : Theme.chipLine, lineWidth: 1.5)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Scrubber (editor)
+
+/// The editor's progress track, but draggable: a 16px marigold knob riding an 8px track, with
+/// a 6px vertical hit-slop so it can be grabbed without precision. Click anywhere on the track
+/// to jump there.
+///
+/// The position it shows belongs to the clip, not to the player — see `AppModel.progressByClip`.
+struct Scrubber: View {
+    var fraction: Double
+    var track: Color = Theme.creamLine
+    var fill: Color = Theme.sage
+    var onSeek: (Double) -> Void
+
+    private let trackHeight: CGFloat = 8
+    private let knob: CGFloat = 16
+    private let slop: CGFloat = 6
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            let clamped = max(0, min(1, fraction))
+
+            ZStack(alignment: .leading) {
+                Capsule().fill(track).frame(height: trackHeight)
+                Capsule().fill(fill).frame(width: clamped * width, height: trackHeight)
+                Circle()
+                    .fill(Theme.marigold)
+                    .overlay(Circle().stroke(Theme.cream, lineWidth: 2))
+                    .frame(width: knob, height: knob)
+                    // Kept inside the track's ends so the knob never overhangs the card.
+                    .offset(x: clamped * (width - knob))
+            }
+            .frame(height: knob, alignment: .center)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in seek(v.location.x, in: width) }
+                    .onEnded { v in seek(v.location.x, in: width) }
+            )
+        }
+        .frame(height: knob + slop * 2)
+    }
+
+    private func seek(_ x: CGFloat, in width: CGFloat) {
+        guard width > knob else { return }
+        // The knob's travel is inset by its own width, so undo that to get the real position.
+        onSeek(Double(max(0, min(1, (x - knob / 2) / (width - knob)))))
+    }
+}

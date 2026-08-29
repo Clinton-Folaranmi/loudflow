@@ -36,6 +36,8 @@ enum Theme {
     static let hairline2     = Color(hex: 0xF0F3EE) // settings row dividers
     static let toggleOff     = Color(hex: 0xDDE4DA) // toggle track off, dashed borders
     static let countInactive = Color(hex: 0xB4BDB2) // nav count when inactive
+    static let chipLine      = Color(hex: 0xCBD6C7) // inactive filter chip border
+    static let playMuted     = Color(hex: 0xA8B0A6) // play icon once retention swept the audio
 
     // MARK: Cream family (the one warm surface — transcript / editor)
     static let cream         = Color(hex: 0xFBF6EA)

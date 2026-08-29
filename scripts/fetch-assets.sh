@@ -23,8 +23,11 @@ curl -fsSL \
   -o "$FONTS_DIR/Nunito.ttf"
 echo "    → Resources/Fonts/Nunito.ttf"
 
-# Every Solar icon the spec references, plus the two added with the app owner's sign-off:
-#   danger-triangle-bold (widget error states) and key-bold-duotone (Settings key card).
+# Every Solar icon the spec references, plus the two added with the app owner's sign-off
+# (danger-triangle-bold for the widget error states, key-bold-duotone for the Settings key
+# card) and the three that came in with design v4: users-group-rounded-bold-duotone for
+# meetings, pen-bold-duotone for renaming a voice, info-circle-bold-duotone for
+# "Where your audio goes".
 ICONS=(
   "microphone-3-bold"
   "soundwave-bold-duotone"
@@ -49,6 +52,9 @@ ICONS=(
   "text-square-bold"
   "danger-triangle-bold"
   "key-bold-duotone"
+  "users-group-rounded-bold-duotone"
+  "pen-bold-duotone"
+  "info-circle-bold-duotone"
 )
 
 echo "==> Fetching ${#ICONS[@]} Solar icons from the Iconify API…"

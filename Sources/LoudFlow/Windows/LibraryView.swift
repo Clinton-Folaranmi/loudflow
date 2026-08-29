@@ -3,6 +3,11 @@ import SwiftUI
 struct LibraryView: View {
     @ObservedObject var model: AppModel
 
+    @State private var contentFrame: CGRect = .zero
+    @State private var viewportHeight: CGFloat = 0
+
+    private static let listSpace = "library.list"
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
@@ -12,30 +17,88 @@ struct LibraryView: View {
             .padding(.horizontal, 4)
             .padding(.top, 4)
 
-            TwoColumn(leftFr: 1, rightFr: 1.15) {
+            filterChips
+
+            // Both columns fill the window height and scroll inside themselves, so opening a
+            // long transcript never scrolls the clip list away.
+            TwoColumn(leftFr: 1, rightFr: 1.15, fillHeight: true) {
                 listCard
             } right: {
                 editorSide
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var listCard: some View {
-        Card(padding: 14) {
-            VStack(spacing: 7) {
-                if model.clips.isEmpty {
-                    Text("No recordings yet.")
-                        .font(Typo.font(14, 400))
-                        .foregroundColor(Theme.placeholder)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 8)
-                } else {
-                    ForEach(model.clips) { clip in
-                        ClipRowView(model: model, clip: clip, variant: .library)
-                    }
+    /// `All` · `Notes` · `Meetings`. The kind of a clip is derived from how many voices are in
+    /// it, so these only ever narrow the same list.
+    private var filterChips: some View {
+        HStack(spacing: 8) {
+            ForEach(LibraryFilter.allCases, id: \.self) { filter in
+                FilterChip(title: filter.label, active: model.libraryFilter == filter) {
+                    model.setFilter(filter)
                 }
             }
         }
+        .padding(.horizontal, 4)
+    }
+
+    private var listCard: some View {
+        Card(padding: 14, fillHeight: true) {
+            ScrollView(.vertical) {
+                VStack(spacing: 7) {
+                    if model.filteredClips.isEmpty {
+                        Text("No recordings yet.")
+                            .font(Typo.font(14, 400))
+                            .foregroundColor(Theme.placeholder)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 8)
+                    } else {
+                        ForEach(model.filteredClips) { clip in
+                            ClipRowView(model: model, clip: clip, variant: .library)
+                        }
+                    }
+                }
+                .background(
+                    GeometryReader { c in
+                        Color.clear.preference(key: ListContentKey.self,
+                                               value: c.frame(in: .named(Self.listSpace)))
+                    }
+                )
+            }
+            .coordinateSpace(name: Self.listSpace)
+            .background(
+                GeometryReader { v in
+                    Color.clear.preference(key: ListViewportKey.self, value: v.size.height)
+                }
+            )
+            .onPreferenceChange(ListContentKey.self) { contentFrame = $0 }
+            .onPreferenceChange(ListViewportKey.self) { viewportHeight = $0 }
+            // Edge fades — the design's `edgeFade`, shown only on the side that still has list
+            // to reach, so the first and last rows aren't dimmed for nothing.
+            .overlay(alignment: .top) {
+                edgeFade(height: 18, top: true).opacity(fadeTop ? 1 : 0)
+            }
+            .overlay(alignment: .bottom) {
+                edgeFade(height: 22, top: false).opacity(fadeBottom ? 1 : 0)
+            }
+            .animation(.easeInOut(duration: 0.15), value: fadeTop)
+            .animation(.easeInOut(duration: 0.15), value: fadeBottom)
+        }
+    }
+
+    // The content frame is measured in the scroll view's own space: it starts above the top
+    // edge once scrolled, and ends past the bottom edge while there is more to come.
+    private var fadeTop: Bool { contentFrame.minY < -1 }
+    private var fadeBottom: Bool { contentFrame.maxY > viewportHeight + 1 }
+
+    private func edgeFade(height: CGFloat, top: Bool) -> some View {
+        LinearGradient(
+            colors: top ? [Theme.card, Theme.card.opacity(0)] : [Theme.card.opacity(0), Theme.card],
+            startPoint: .top, endPoint: .bottom
+        )
+        .frame(height: height)
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder private var editorSide: some View {
@@ -51,125 +114,238 @@ struct LibraryView: View {
                     .font(Typo.font(14, 400))
                     .foregroundColor(Theme.creamMuted)
             }
-            .frame(maxWidth: .infinity, minHeight: 420, alignment: .center)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Theme.cream))
         }
     }
 }
 
+/// Frame of the clip list's content inside its scroll view, and the height of the scroll
+/// viewport — together they say which edge fade should be showing.
+private struct ListContentKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+}
+
+private struct ListViewportKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+// MARK: - Editor
+
 private struct EditorPane: View {
     @ObservedObject var model: AppModel
     let clip: Clip
 
-    @State private var text: String
+    /// A note's sentences and a conversation's turns are both edited as a list of strings, so
+    /// one buffer covers both.
+    @State private var blocks: [String]
     @State private var flashBg: Color = Theme.card
     @State private var confirmingDelete = false
+    @State private var renamingVoice: Int?
 
     init(model: AppModel, clip: Clip) {
         self.model = model
         self.clip = clip
-        _text = State(initialValue: clip.text)
+        _blocks = State(initialValue: clip.isConversation
+                        ? (clip.turns ?? []).map(\.text)
+                        : clip.sentences)
     }
 
     private var isPlaying: Bool { model.playingId == clip.id }
-    private var fraction: Double { isPlaying ? model.progress : 0 }
+    private var fraction: Double { model.progress(for: clip.id) }
     private var elapsedLabel: String {
-        isPlaying ? Clip.formatSeconds(Int((Double(clip.seconds) * fraction).rounded())) : "0:00"
+        Clip.formatSeconds(Int((Double(clip.seconds) * fraction).rounded()))
     }
-    private var wordCount: Int { text.split(whereSeparator: { $0 == " " || $0 == "\n" }).count }
+    private var wordCount: Int {
+        blocks.joined(separator: " ").split(whereSeparator: { $0 == " " || $0 == "\n" }).count
+    }
+    private var isTranscribing: Bool { model.transcribingIds.contains(clip.id) }
+
+    /// A conversation is read by default; a note is always editable in place.
+    private var editingConversation: Bool { clip.isConversation && model.editingTranscript }
+
+    private var transcriptLabel: String {
+        if !clip.isConversation { return "TRANSCRIPT · EDITABLE" }
+        return model.editingTranscript ? "TRANSCRIPT · EDITING" : "TRANSCRIPT"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Metadata
-            HStack(spacing: 10) {
-                Text(clip.timeLabel); Text("·"); Text(clip.durationLabel); Text("·"); Text(clip.sizeLabel)
-            }
-            .font(Typo.font(12, 700))
-            .tracking(0.04 * 12)
-            .foregroundColor(Theme.marigoldInk)
+            metadata
 
-            // Player
-            HStack(spacing: 14) {
-                Button { model.togglePlaySelected() } label: {
-                    ZStack {
-                        Circle().fill(Theme.marigold).frame(width: 44, height: 44)
-                        SolarIcon(name: isPlaying ? Solar.pause : Solar.play, size: 19, color: Theme.creamInk)
-                    }
-                }
-                .buttonStyle(.plain)
-
-                VStack(spacing: 7) {
-                    ProgressTrack(fraction: fraction, height: 8, track: Theme.creamLine, fill: Theme.sage)
-                    HStack {
-                        Text(elapsedLabel)
-                        Spacer()
-                        Text(clip.durationLabel)
-                    }
-                    .font(Typo.font(11.5, 700))
-                    .foregroundColor(Theme.creamMuted)
-                }
+            // Once retention has swept the audio there is no player to show — the strip says
+            // so instead of leaving a dead transport behind.
+            if clip.audioDeleted {
+                retentionStrip
+            } else {
+                player
             }
 
             Rectangle().fill(Theme.creamLine).frame(height: 1)
 
-            // Transcript — editable field, or a retry panel if it never transcribed.
             if clip.needsTranscription {
                 retryPanel
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("TRANSCRIPT · EDITABLE")
-                            .font(Typo.font(12, 700)).tracking(0.06 * 12)
-                            .foregroundColor(Theme.creamMuted)
-                        Spacer()
-                        Text("\(wordCount) words")
-                            .font(Typo.font(12, 700))
-                            .foregroundColor(Theme.muted)
-                    }
-
-                    TextEditor(text: $text)
-                        .font(Typo.font(17.5, 400))
-                        .foregroundColor(Theme.ink)
-                        .scrollContentBackground(.hidden)
-                        .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
-                        .frame(minHeight: 120)
-                        .background(RoundedRectangle(cornerRadius: Theme.Radius.editor).fill(flashBg))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Theme.Radius.editor)
-                                .stroke(Theme.creamLine2, lineWidth: 1.5)
-                        )
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                transcript
             }
 
-            // Actions
-            HStack(spacing: 8) {
-                if !clip.needsTranscription {
-                    Button { model.saveEdit(text) } label: {
-                        pill(icon: Solar.check, title: "Save changes",
-                             bg: Theme.ink, fg: Theme.cream, weight: 800)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button { model.copySelected() } label: {
-                        pill(icon: Solar.copy, title: "Copy",
-                             bg: Theme.creamChip, fg: Theme.creamBody, weight: 700)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                Spacer()
-
-                deleteControl
-            }
+            actions
         }
         .padding(22)
-        .frame(maxWidth: .infinity, minHeight: 420, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Theme.cream))
         .onAppear(perform: maybeFlash)
     }
 
-    private var isTranscribing: Bool { model.transcribingIds.contains(clip.id) }
+    // MARK: Metadata + transport
+
+    private var metadata: some View {
+        HStack(spacing: 10) {
+            Text(clip.timeLabel); Text("·"); Text(clip.durationLabel); Text("·")
+            Text(clip.audioDeleted ? "transcript only" : clip.sizeLabel)
+        }
+        .font(Typo.font(12, 700))
+        .tracking(0.04 * 12)
+        .foregroundColor(Theme.marigoldInk)
+    }
+
+    private var player: some View {
+        HStack(spacing: 14) {
+            Button { model.togglePlaySelected() } label: {
+                ZStack {
+                    Circle().fill(Theme.marigold).frame(width: 44, height: 44)
+                    SolarIcon(name: isPlaying ? Solar.pause : Solar.play, size: 19, color: Theme.creamInk)
+                }
+            }
+            .buttonStyle(.plain)
+
+            VStack(spacing: 1) {
+                Scrubber(fraction: fraction) { model.seek(clip, to: $0) }
+                HStack {
+                    Text(elapsedLabel)
+                    Spacer()
+                    Text(clip.durationLabel)
+                }
+                .font(Typo.font(11.5, 700))
+                .foregroundColor(Theme.creamMuted)
+            }
+        }
+    }
+
+    private var retentionStrip: some View {
+        HStack(spacing: 10) {
+            SolarIcon(name: Solar.history, size: 17, color: Theme.creamMuted)
+            Text("Audio cleared by retention. The transcript stays.")
+                .font(Typo.font(12.5, 700))
+                .foregroundColor(Theme.marigoldInk)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 15).padding(.vertical, 13)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.editor).fill(Theme.creamChip))
+    }
+
+    // MARK: Transcript
+
+    private var transcript: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(transcriptLabel)
+                    .font(Typo.font(12, 700)).tracking(0.06 * 12)
+                    .foregroundColor(Theme.creamMuted)
+                Spacer()
+                Text("\(wordCount) words")
+                    .font(Typo.font(12, 700))
+                    .foregroundColor(Theme.muted)
+            }
+
+            // Takes whatever height is left in the pane and scrolls its own text — a long
+            // transcript never pushes the actions (or the clip list) away.
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    if clip.isConversation {
+                        turnBlocks
+                    } else {
+                        sentenceBlocks
+                    }
+                }
+                .onChange(of: activeIndex) { index in
+                    // Follow playback, but never while the caret is in a field.
+                    guard let index, !model.editingTranscript else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(index, anchor: .center) }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 12).padding(.vertical, 11)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.editor).fill(flashBg))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.editor)
+                    .stroke(Theme.creamLine2, lineWidth: 1.5)
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var turns: [Turn] { clip.turns ?? [] }
+
+    private var turnBlocks: some View {
+        LazyVStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(turns.enumerated()), id: \.offset) { i, turn in
+                TurnBlockView(
+                    model: model,
+                    clip: clip,
+                    index: i,
+                    turn: turn,
+                    editing: editingConversation,
+                    active: activeIndex == i,
+                    text: binding(i),
+                    renamingVoice: $renamingVoice
+                )
+                .id(i)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A note's sentences: plain editable text, flush. The gutter play handle, the hover tint,
+    /// and click-to-seek are gone — a fourteen-second clip doesn't need them, and the scrubber
+    /// covers it. The playback highlight stays.
+    private var sentenceBlocks: some View {
+        LazyVStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { i, _ in
+                TextField("", text: binding(i), axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(Typo.font(17.5, 400))
+                    .lineSpacing(17.5 * 0.5)
+                    .foregroundColor(Theme.ink)
+                    .padding(.horizontal, 6).padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 9)
+                            .fill(activeIndex == i ? Theme.creamChip : .clear)
+                    )
+                    .id(i)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func binding(_ i: Int) -> Binding<String> {
+        Binding(
+            get: { i < blocks.count ? blocks[i] : "" },
+            set: { if i < blocks.count { blocks[i] = $0 } }
+        )
+    }
+
+    /// The block the playhead is inside, for the highlight and the auto-scroll.
+    private var activeIndex: Int? {
+        guard isPlaying else { return nil }
+        if clip.isConversation { return model.activeTurnIndex(in: clip) }
+        let now = fraction * Double(clip.seconds)
+        return clip.sentenceRanges.lastIndex { $0.start <= now }
+    }
+
+    // MARK: Retry
 
     // Shown in place of the editor when a clip has audio but no transcript yet.
     private var retryPanel: some View {
@@ -179,31 +355,88 @@ private struct EditorPane: View {
                 .foregroundColor(Theme.creamMuted)
             VStack(spacing: 10) {
                 if isTranscribing {
-                    ProgressView()
+                    SpinRing(size: 18, lineWidth: 2.5)
                     Text("Transcribing…").font(Typo.font(14, 700)).foregroundColor(Theme.creamBody)
                 } else {
                     Text("This recording didn't get transcribed.")
                         .font(Typo.font(15, 700)).foregroundColor(Theme.creamInk)
-                    Text("Your audio is safe — retry when you're back online.")
-                        .font(Typo.font(12.5, 400)).foregroundColor(Theme.creamMuted)
-                    Button { model.retryTranscription(clip.id) } label: {
-                        HStack(spacing: 7) {
-                            SolarIcon(name: Solar.restart, size: 15, color: Theme.cream)
-                            Text("Retry transcription").font(Typo.font(13, 800)).foregroundColor(Theme.cream)
+
+                    if clip.audioDeleted {
+                        // Nothing to send: the sweep got there first. No retry button.
+                        Text("The audio was cleared by retention before this one transcribed, so there's nothing left to send.")
+                            .font(Typo.font(12.5, 400))
+                            .foregroundColor(Theme.creamMuted)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(12.5 * 0.5)
+                            .frame(maxWidth: 280)
+                    } else {
+                        Text("Your audio is safe — retry when you're back online.")
+                            .font(Typo.font(12.5, 400)).foregroundColor(Theme.creamMuted)
+                        Button { model.retryTranscription(clip.id) } label: {
+                            HStack(spacing: 7) {
+                                SolarIcon(name: Solar.restart, size: 15, color: Theme.cream)
+                                Text("Retry transcription").font(Typo.font(13, 800)).foregroundColor(Theme.cream)
+                            }
+                            .padding(.horizontal, 18).padding(.vertical, 11)
+                            .background(Capsule().fill(Theme.ink))
                         }
-                        .padding(.horizontal, 18).padding(.vertical, 11)
-                        .background(Capsule().fill(Theme.ink))
+                        .buttonStyle(.plain)
+                        .padding(.top, 2)
                     }
-                    .buttonStyle(.plain)
-                    .padding(.top, 2)
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 120)
             .padding(20)
             .background(RoundedRectangle(cornerRadius: Theme.Radius.editor).fill(Theme.card))
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.editor).stroke(Theme.creamLine2, lineWidth: 1.5))
+
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: Actions
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            if !clip.needsTranscription {
+                if clip.isConversation {
+                    // Read by default: the primary button opens editing, and closing it commits.
+                    Button(action: toggleConversationEditing) {
+                        pill(icon: model.editingTranscript ? Solar.check : Solar.pen,
+                             title: model.editingTranscript ? "Done editing" : "Edit transcript",
+                             bg: Theme.ink, fg: Theme.cream, weight: 800)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button { model.saveEdit(blocks.joined(separator: " ")) } label: {
+                        pill(icon: Solar.check, title: "Save changes",
+                             bg: Theme.ink, fg: Theme.cream, weight: 800)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button { model.copySelected() } label: {
+                    pill(icon: Solar.copy, title: "Copy",
+                         bg: Theme.creamChip, fg: Theme.creamBody, weight: 700)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+
+            deleteControl
+        }
+    }
+
+    private func toggleConversationEditing() {
+        if model.editingTranscript {
+            model.saveTurns(blocks)
+            model.editingTranscript = false
+        } else {
+            renamingVoice = nil
+            model.editingTranscript = true
+        }
     }
 
     // Delete asks first (irreversible: removes audio + transcript, no undo).
@@ -236,7 +469,7 @@ private struct EditorPane: View {
             SolarIcon(name: icon, size: 15, color: fg)
             Text(title).font(Typo.font(13, weight)).foregroundColor(fg)
         }
-        .padding(.horizontal, title == "Save changes" ? 18 : 16)
+        .padding(.horizontal, bg == Theme.ink ? 18 : 16)
         .padding(.vertical, 10)
         .background(Capsule().fill(bg))
     }

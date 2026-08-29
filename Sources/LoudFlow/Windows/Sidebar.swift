@@ -64,10 +64,12 @@ struct Sidebar: View {
         .themeShadow(Theme.Shadow.card)
     }
 
+    /// `LoudFlow 1.4.0 (10) · design 4` — the design version rides along with the build
+    /// number while the design is in flux, so a stale build is visible at a glance.
     static var versionString: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        return "LoudFlow \(v) (\(b))"
+        return "LoudFlow \(v) (\(b)) · design \(DesignVersion.current)"
     }
 
     private func count(for tab: Tab) -> String {

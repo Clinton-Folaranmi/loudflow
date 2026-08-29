@@ -6,6 +6,7 @@ import SwiftUI
 struct TranscriptionCard: View {
     @ObservedObject var model: AppModel
     @State private var keyInput: String = ""
+    @State private var showingInfo = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -65,16 +66,49 @@ struct TranscriptionCard: View {
             HStack(spacing: 6) {
                 Circle().fill(statusColor).frame(width: 7, height: 7)
                 Text(statusText).font(Typo.font(12.5, 700)).foregroundColor(Theme.marigoldInk)
+                if needsKey {
+                    Link("Get a \(model.provider.displayName) key", destination: model.provider.keyURL)
+                        .font(Typo.font(12.5, 800))
+                        .foregroundColor(Theme.marigoldInk)
+                        .underline()
+                }
             }
 
-            Text("Audio goes to \(model.provider.displayName) to be transcribed with a zero-retention request, then nothing is kept there. The key lives in your Mac's Keychain.")
-                .font(Typo.font(12.5, 400))
-                .foregroundColor(Theme.creamBody)
-                .lineSpacing(12.5 * 0.4)
+            audioDestination
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.cardSmall).fill(Theme.cream))
+    }
+
+    /// The standing privacy paragraph, folded into an affordance so it doesn't shout on every
+    /// visit — but the sentence itself is unchanged and still names the cloud round trip.
+    private var audioDestination: some View {
+        HStack(spacing: 6) {
+            SolarIcon(name: Solar.info, size: 15, color: Theme.creamMuted)
+            Text("Where your audio goes")
+                .font(Typo.font(12.5, 700))
+                .foregroundColor(Theme.creamMuted)
+        }
+        .onHover { showingInfo = $0 }
+        .overlay(alignment: .bottomLeading) {
+            if showingInfo {
+                Text("Audio goes to \(model.provider.displayName) to be transcribed with a zero-retention request, then nothing is kept there. The key lives in your Mac's Keychain.")
+                    .font(Typo.font(12.5, 400))
+                    .foregroundColor(Theme.inkOnDark)
+                    .lineSpacing(12.5 * 0.45)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 280, alignment: .leading)
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: Theme.Radius.editor).fill(Theme.ink))
+                    .shadow(color: Color(hex: 0x141C14, alpha: 0.28), radius: 18, x: 0, y: 6)
+                    .offset(y: -26)
+            }
+        }
+    }
+
+    private var needsKey: Bool {
+        model.keyStatus == .missing || model.keyStatus == .rejected
     }
 
     private var statusColor: Color {
@@ -91,7 +125,7 @@ struct TranscriptionCard: View {
         case .saved:    return "Key saved."
         case .checking: return "Checking…"
         case .rejected: return "That key was rejected."
-        case .missing:  return "No key yet — recordings will wait until you add one."
+        case .missing:  return "No key yet — recordings wait until there is one."
         }
     }
 }

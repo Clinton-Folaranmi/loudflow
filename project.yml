@@ -2,14 +2,16 @@ name: LoudFlow
 options:
   bundleIdPrefix: com.loudflow
   deploymentTarget:
-    macOS: "13.0"
+    # 14.2 is where Core Audio process taps arrive. They are how LoudFlow records the other
+    # side of a call without asking for the Screen Recording permission.
+    macOS: "14.2"
   createIntermediateGroups: true
 
 settings:
   base:
     # Semantic version MAJOR.MINOR.PATCH. Bump MINOR per feature batch, PATCH per fix.
-    MARKETING_VERSION: "1.3.0"
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "1.4.0"
+    CURRENT_PROJECT_VERSION: "10"
     SWIFT_VERSION: "5.9"
     DEVELOPMENT_LANGUAGE: en
     # Personal/local build: ad-hoc "Sign to Run Locally". Set your own team in Xcode if you
@@ -19,6 +21,17 @@ settings:
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGNING_ALLOWED: "YES"
     ENABLE_HARDENED_RUNTIME: NO
+
+packages:
+  # On-device speaker embeddings (pyannote segmentation + WeSpeaker, as CoreML). Used only to
+  # answer "is this the same voice as last time?" — the transcript itself still comes from the
+  # cloud provider. Apache 2.0; the underlying models are MIT / open source.
+  # Pinned exactly: LoudFlow's match thresholds are tuned against this embedder, and
+  # Package.resolved lives inside the generated .xcodeproj, so it isn't committed to pin it
+  # for us. Bump deliberately, and re-check the thresholds when you do.
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio
+    exactVersion: "0.15.6"
 
 targets:
   LoudFlow:
@@ -34,6 +47,8 @@ targets:
       # which is what ATSApplicationFontsPath ("Fonts") auto-registers at launch.
       - path: Resources/Fonts
         type: folder
+    dependencies:
+      - package: FluidAudio
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.loudflow.app

@@ -17,10 +17,13 @@ struct OnboardingView: View {
                             body: "Just checking your mic works. Nothing is recorded yet.")
         case 1: return Copy(kicker: "Step 2", title: "How do you want to record?",
                             body: "You can change this anytime.")
+        // Steps 3 and 4 are one line each, so no step's body needs reserved height and the
+        // card stays a constant size as you page through it. The cloud round trip is still
+        // named — on step 3 and in Settings — so step 4 does not repeat the provider.
         case 2: return Copy(kicker: "Step 3", title: "Add your transcription key.",
-                            body: "LoudFlow uses \(model.provider.displayName) to turn your voice into text. Paste your key to continue — nothing works without it.")
+                            body: "Nothing transcribes without your \(model.provider.displayName) key.")
         default: return Copy(kicker: "Step 4", title: "How long to keep recordings?",
-                             body: "Recordings stay on this Mac. Audio is sent to \(model.provider.displayName) to transcribe, then deleted there.")
+                             body: "Kept on this Mac. Transcribed in the cloud, then deleted.")
         }
     }
 
@@ -55,8 +58,10 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(EdgeInsets(top: 24, leading: 26, bottom: 6, trailing: 26))
 
-                // Step content
+                // Step content. Each step's own section reserves the 192pt, and centres its
+                // content inside it, so the card height never changes between steps.
                 stepContent
+                    .frame(maxWidth: .infinity, minHeight: 192, alignment: .center)
                     .padding(EdgeInsets(top: 18, leading: 26, bottom: 0, trailing: 26))
 
                 // Footer
@@ -113,15 +118,17 @@ struct OnboardingView: View {
         VStack(spacing: 9) {
             ForEach(TriggerMode.allCases, id: \.self) { t in
                 Button { model.selectTrigger(t) } label: {
+                    // icon · name · keycap. The name takes the slack so the keycap sits hard
+                    // right. The descriptions live on the Settings trigger cards now — here
+                    // they only made the modal taller on one step than on the others.
                     HStack(spacing: 13) {
                         SolarIcon(name: t.iconName, size: 22, color: Theme.sage)
+                        Text(t.name)
+                            .font(Typo.font(14, 800))
+                            .foregroundColor(Theme.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         Keycap(text: t.combo, fg: Theme.body, bg: Theme.sagePale2,
                                radius: Theme.Radius.keycap, hPad: 10, vPad: 5)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(t.name).font(Typo.font(14, 800)).foregroundColor(Theme.ink)
-                            Text(t.desc).font(Typo.font(12.5, 400)).foregroundColor(Theme.muted)
-                        }
-                        Spacer()
                     }
                     .padding(EdgeInsets(top: 14, leading: 15, bottom: 14, trailing: 15))
                     .frame(maxWidth: .infinity, alignment: .leading)

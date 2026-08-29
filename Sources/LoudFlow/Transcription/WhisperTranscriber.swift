@@ -11,7 +11,7 @@ struct WhisperTranscriber: Transcriber {
     private let endpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
     private var apiKey: String? { Keychain.key(for: .whisper) }
 
-    func transcribe(_ audioURL: URL) async throws -> String {
+    func transcribe(_ audioURL: URL, twoTrack: Bool) async throws -> TranscriptionResult {
         guard let key = apiKey else { throw TranscriberError.missingKey }
         guard let audio = try? Data(contentsOf: audioURL) else { throw TranscriberError.decoding }
 
@@ -32,9 +32,9 @@ struct WhisperTranscriber: Transcriber {
         guard let http = response as? HTTPURLResponse else { throw TranscriberError.network }
         guard (200..<300).contains(http.statusCode) else { throw mapStatus(http.statusCode) }
 
-        // response_format=text → the body is the raw transcript.
+        // response_format=text → the body is the transcript, already punctuated by the model.
         guard let text = String(data: data, encoding: .utf8) else { throw TranscriberError.decoding }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return .plain(text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     func validateKey() async -> Bool {

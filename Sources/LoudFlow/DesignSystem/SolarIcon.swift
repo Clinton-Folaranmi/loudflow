@@ -56,6 +56,9 @@ struct SolarIcon: View {
         Solar.textSquare: "text.append",
         Solar.danger: "exclamationmark.triangle.fill",
         Solar.key: "key.fill",
+        Solar.speakers: "person.2.fill",
+        Solar.pen: "pencil",
+        Solar.info: "info.circle.fill",
     ]
 }
 
@@ -85,4 +88,7 @@ enum Solar {
     static let textSquare  = "text-square-bold"
     static let danger      = "danger-triangle-bold" // widget error states (added)
     static let key         = "key-bold-duotone"      // Settings transcription card (added)
+    static let speakers    = "users-group-rounded-bold-duotone" // meetings: rows, Settings card
+    static let pen         = "pen-bold-duotone"      // rename a voice
+    static let info        = "info-circle-bold-duotone" // "Where your audio goes"
 }

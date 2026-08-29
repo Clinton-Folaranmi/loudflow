@@ -10,7 +10,6 @@ enum Preferences {
         static let retention = "retention"
         static let optionInsert = "opt.insert"
         static let optionKeep = "opt.keep"
-        static let optionPunct = "opt.punct"
         static let provider = "provider"
         static let onboarded = "onboarded"
         static let wordsToday = "wordsToday"
@@ -31,14 +30,12 @@ enum Preferences {
         get {
             DictationOptions(
                 insert: d.object(forKey: Key.optionInsert) as? Bool ?? true,
-                keep: d.object(forKey: Key.optionKeep) as? Bool ?? true,
-                punct: d.object(forKey: Key.optionPunct) as? Bool ?? true
+                keep: d.object(forKey: Key.optionKeep) as? Bool ?? true
             )
         }
         set {
             d.set(newValue.insert, forKey: Key.optionInsert)
             d.set(newValue.keep, forKey: Key.optionKeep)
-            d.set(newValue.punct, forKey: Key.optionPunct)
         }
     }
 

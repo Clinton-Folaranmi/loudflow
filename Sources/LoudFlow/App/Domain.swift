@@ -81,7 +81,7 @@ enum Retention: String, CaseIterable, Codable {
         case .forever:
             return "Nothing gets deleted on its own. Watch the disk meter."
         default:
-            return "Older clips delete themselves after \(rawValue) days. Transcripts stay."
+            return "Older clips delete themselves after \(rawValue) days. Transcripts remain."
         }
     }
 }
@@ -98,17 +98,29 @@ enum Provider: String, CaseIterable, Codable {
         case .whisper:  return "OpenAI Whisper"
         }
     }
+
+    /// Where to go and get a key, linked from Settings when there isn't one (or it was
+    /// rejected). Nothing transcribes without it, so the app points at the door.
+    var keyURL: URL {
+        switch self {
+        case .deepgram: return URL(string: "https://console.deepgram.com/signup")!
+        case .whisper:  return URL(string: "https://platform.openai.com/api-keys")!
+        }
+    }
 }
 
-// MARK: - Options (the three settings toggles)
+// MARK: - Options (the two settings toggles)
 
+/// The only two switches in Settings.
+///
+/// There is deliberately no formatting toggle: punctuation, paragraph breaks, and readable
+/// numbers are the ASR model's own output rather than a rewrite, so they are always on. And
+/// there is no speakers toggle — two-track capture is how recording works, not a preference.
 struct DictationOptions: Codable, Equatable {
     /// Type the transcript into the frontmost field; off = clipboard only.
     var insert: Bool = true
     /// Keep the audio, not just the text.
     var keep: Bool = true
-    /// Add punctuation (capitalize first char, append a full stop). No rephrasing, ever.
-    var punct: Bool = true
 }
 
 // MARK: - Widget state

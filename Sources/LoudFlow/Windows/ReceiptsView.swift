@@ -33,27 +33,101 @@ struct ReceiptsView: View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Words per day").font(Typo.font(16, 800)).foregroundColor(Theme.ink)
-                WeekChart(bars: weekBars, chartHeight: 170, gap: 16)
+                // 112pt of headroom so the tallest bar's hover panel never covers the heading.
+                chart.padding(.top, 112)
                 Text(model.longestCaption)
                     .font(Typo.font(13, 400)).foregroundColor(Theme.body)
             }
         }
     }
 
-    // Real per-day word counts for the last 7 days; the loudest day is the sage peak.
-    private var weekBars: [ChartBar] {
+    /// The week's bars, each one its own hover target. Hovering turns the bar marigold and
+    /// floats the day's detail above it — anchored to the bar, so the panel tracks the day's
+    /// height instead of sitting at a fixed line.
+    private var chart: some View {
         let week = model.weekWords
         let maxWords = max(1, week.map(\.words).max() ?? 1)
-        return week.map { d in
-            let peak = (d.words == maxWords && d.words > 0)
-            return ChartBar(
-                fraction: Double(d.words) / Double(maxWords),
-                color: peak ? Theme.sage : Theme.desk,
-                label: d.label,
-                labelColor: peak ? Theme.sageDeep : Theme.muted,
-                labelWeight: peak ? 800 : 700
-            )
+
+        return HStack(alignment: .top, spacing: 16) {
+            ForEach(Array(week.enumerated()), id: \.element.id) { index, day in
+                DayColumn(
+                    day: day,
+                    fraction: Double(day.words) / Double(maxWords),
+                    chartHeight: 170,
+                    peak: day.words == maxWords && day.words > 0,
+                    typingWPM: model.typingWPM,
+                    panelEdge: index == 0 ? .leading : (index == week.count - 1 ? .trailing : .center)
+                )
+                .frame(maxWidth: .infinity)
+            }
         }
+    }
+}
+
+/// One day of the chart: the bar, its weekday label, and the detail panel on hover.
+private struct DayColumn: View {
+    let day: AppModel.DayWords
+    let fraction: Double
+    let chartHeight: CGFloat
+    let peak: Bool
+    let typingWPM: Int
+    let panelEdge: PanelEdge
+
+    enum PanelEdge { case leading, center, trailing }
+
+    @State private var hovering = false
+
+    private var barHeight: CGFloat { max(2, chartHeight * fraction) }
+    private var barColor: Color { hovering ? Theme.marigold : (peak ? Theme.sage : Theme.desk) }
+
+    private var alignment: Alignment {
+        switch panelEdge {
+        case .leading:  return .bottomLeading
+        case .center:   return .bottom
+        case .trailing: return .bottomTrailing
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack(alignment: .bottom) {
+                Color.clear.frame(maxWidth: .infinity).frame(height: chartHeight)
+                UnevenRoundedRectangle(topLeadingRadius: Theme.Radius.bar,
+                                       topTrailingRadius: Theme.Radius.bar)
+                    .fill(barColor)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: barHeight)
+                    .animation(.easeInOut(duration: 0.12), value: hovering)
+            }
+            .overlay(alignment: alignment) {
+                if hovering {
+                    panel.offset(y: -(barHeight + 8))
+                }
+            }
+            Text(day.label)
+                .font(Typo.font(12, peak ? 800 : 700))
+                .foregroundColor(peak ? Theme.sageDeep : Theme.muted)
+        }
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+    }
+
+    private var panel: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("\(day.words) words")
+                .font(Typo.font(15, 800)).foregroundColor(Theme.marigold)
+            Text("\(day.minutesSaved(typingWPM: typingWPM)) min of typing avoided")
+                .font(Typo.font(12, 700)).foregroundColor(Theme.inkOnDark)
+            Text(day.recordingsLine)
+                .font(Typo.font(12, 400)).foregroundColor(Theme.inkMutedOnDark)
+            Text(day.longestLine)
+                .font(Typo.font(12, 400)).foregroundColor(Theme.inkMutedOnDark)
+        }
+        .frame(width: 184, alignment: .leading)
+        .padding(.horizontal, 13).padding(.vertical, 11)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.editor).fill(Theme.ink))
+        .shadow(color: Color(hex: 0x141C14, alpha: 0.28), radius: 18, x: 0, y: 6)
+        .allowsHitTesting(false)
     }
 }
 

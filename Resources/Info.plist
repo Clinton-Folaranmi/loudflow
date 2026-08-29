@@ -43,6 +43,12 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>LoudFlow records your voice so it can be transcribed into text.</string>
 
+	<!-- System audio: the other side of a call, captured as its own track via a Core Audio
+	     process tap so the transcript can tell you apart from whoever you are talking to.
+	     This is an audio-only permission — LoudFlow never captures the screen. -->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>LoudFlow records the other side of your calls, so a conversation's transcript can say who said what.</string>
+
 	<!-- Speech recognition entitlement string is not used (cloud transcription),
 	     but Accessibility (System Settings > Privacy) is requested at runtime for
 	     global hotkeys and typing text into other apps. No usage string key exists

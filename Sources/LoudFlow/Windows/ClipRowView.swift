@@ -1,7 +1,11 @@
 import SwiftUI
 
 /// A clip row, shared by Today and Library. Clicking the row opens the clip in Library;
-/// the play button and copy pill stop propagation so they don't also open it.
+/// the leading circle and the copy pill stop propagation so they don't also open it.
+///
+/// The leading circle says **what kind of recording this is** — a soundwave for a note, a group
+/// for a meeting — and morphs to play on hover. That is the only place the two kinds are
+/// announced, because the kind is derived from how many voices were heard, not chosen.
 struct ClipRowView: View {
     enum Variant { case today, library }
 
@@ -20,7 +24,7 @@ struct ClipRowView: View {
     private var previewText: String {
         if isTranscribing { return "Transcribing…" }
         if clip.needsTranscription { return "Transcription didn't finish" }
-        return clip.preview
+        return clip.preview(voices: model.voices.voices)
     }
 
     private var background: Color {
@@ -31,19 +35,39 @@ struct ClipRowView: View {
         }
     }
 
+    // MARK: Leading circle
+
+    /// Rest shows the kind; hover offers to play it; playing offers to stop.
+    private var leadingIcon: String {
+        if isPlaying { return Solar.pause }
+        if hovering { return Solar.play }
+        return clip.isConversation ? Solar.speakers : Solar.today
+    }
+
+    private var circleFill: Color {
+        if clip.audioDeleted { return Theme.sagePale2 }
+        return isPlaying ? Theme.marigold : Theme.sagePale
+    }
+
+    private var circleInk: Color {
+        if clip.audioDeleted { return Theme.playMuted }
+        return isPlaying ? Theme.creamInk : Theme.sageDeep
+    }
+
     var body: some View {
         HStack(spacing: rowGap) {
             // Play / pause — stops propagation so playback never opens the clip.
             Button { model.play(clip) } label: {
                 ZStack {
-                    Circle().fill(isPlaying ? Theme.marigold : Theme.sagePale)
-                    SolarIcon(name: isPlaying ? Solar.pause : Solar.play,
+                    Circle().fill(circleFill)
+                    SolarIcon(name: leadingIcon,
                               size: variant == .today ? 14 : 15,
-                              color: isPlaying ? Theme.creamInk : Theme.sageDeep)
+                              color: circleInk)
                 }
                 .frame(width: playSize, height: playSize)
             }
             .buttonStyle(.plain)
+            .help(clip.audioDeleted ? "Audio cleared by retention" : "")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(previewText)
@@ -51,7 +75,7 @@ struct ClipRowView: View {
                     .foregroundColor(clip.needsTranscription ? Theme.muted : Theme.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text("\(clip.timeLabel) · \(clip.sizeLabel)")
+                Text(clip.metadataLine)
                     .font(Typo.font(11.5, 600))
                     .foregroundColor(Theme.muted)
             }
@@ -74,8 +98,10 @@ struct ClipRowView: View {
 
     @ViewBuilder private var trailingAction: some View {
         if isTranscribing {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
+            // Copy and retry stay hidden while a row is transcribing — there is nothing to act
+            // on yet.
+            HStack(spacing: 7) {
+                SpinRing()
                 Text("Transcribing…").font(Typo.font(11.5, 700)).foregroundColor(Theme.muted)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
@@ -91,7 +117,8 @@ struct ClipRowView: View {
             }
             .buttonStyle(.plain)
         } else {
-            // Copy pill — hidden until hover.
+            // Copy pill — hidden until hover. One button: a meeting copies with speaker names,
+            // a note copies bare.
             Button { model.copy(clip) } label: {
                 HStack(spacing: 6) {
                     SolarIcon(name: Solar.copy, size: 13, color: Theme.body)

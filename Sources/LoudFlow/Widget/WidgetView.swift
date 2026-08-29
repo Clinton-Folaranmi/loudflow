@@ -6,8 +6,12 @@ struct WidgetSizeKey: PreferenceKey {
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
 }
 
-/// The floating widget. At rest it's just the mic dot (Wispr-style); hovering expands it to
-/// the labeled pill; recording swaps in a pill with **stop** and **cancel (✕)** buttons.
+/// The floating widget: **one pill that morphs**, not five pills that swap.
+///
+/// Background and padding animate over 0.22s, the leading dot animates its fill and its size,
+/// and only the labels change. Nothing translates vertically — the `fRise` entrance belongs to
+/// the toast and the onboarding modal, not to a state the widget is already showing.
+///
 /// Everything anchors to the screen edge it lives near (`anchorRight`) so content unfurls
 /// *inward*. Drag (past a small threshold) moves it; a plain tap records.
 struct WidgetView: View {
@@ -27,14 +31,10 @@ struct WidgetView: View {
             if let toast = model.toast {
                 toastView(toast).transition(.fRise)
             }
-            pill
-                .id(stateKey)
-                .transition(.fRise)
-                .simultaneousGesture(dragGesture)
+            pill.simultaneousGesture(dragGesture)
         }
         .padding(shadowPad)
         .fixedSize()
-        .animation(.easeOut(duration: 0.16), value: stateKey)
         .animation(.easeOut(duration: 0.16), value: model.toast)
         .background(
             GeometryReader { proxy in
@@ -51,134 +51,195 @@ struct WidgetView: View {
             .onEnded { _ in if moved { moved = false; onDragEnded?() } }
     }
 
-    private var stateKey: String {
-        switch model.widgetState {
-        case .idle: return "idle"
-        case .recording: return "rec"
-        case .transcribing: return "trans"
-        case .queued: return "queued"
-        case .error(let f): return "err-\(f)"
-        }
-    }
+    // MARK: - The one pill
 
-    @ViewBuilder private var pill: some View {
-        switch model.widgetState {
-        case .idle:          idlePill
-        case .recording:     recordingPill
-        case .transcribing:  transcribingPill
-        case .queued:        queuedPill
-        case .error(let f):  errorPill(f)
-        }
-    }
+    private var state: WidgetState { model.widgetState }
 
-    private func pillRow(spacing: CGFloat, _ items: [AnyView]) -> some View {
+    private var pill: some View {
+        let items = contents
         let ordered = anchorRight ? Array(items.reversed()) : items
-        return HStack(spacing: spacing) {
+
+        return HStack(spacing: 9) {
             ForEach(Array(ordered.enumerated()), id: \.offset) { _, v in v }
         }
+        .padding(padding)
+        .background(Capsule().fill(pillBackground))
+        .shadow(color: Color(hex: 0x2A3129, alpha: 0.18), radius: 9, x: 0, y: 4)
+        .contentShape(Capsule())
+        .onHover { hovering = $0 }
+        .onTapGesture(perform: tapped)
+        .animation(.easeInOut(duration: 0.22), value: paddingKey)
+        .animation(.easeInOut(duration: 0.22), value: pillBackground)
     }
 
-    private func widgetShadow<V: View>(_ v: V) -> some View {
-        v.shadow(color: Color(hex: 0x2A3129, alpha: 0.18), radius: 9, x: 0, y: 4)
+    /// Idle starts (unless the trigger is hold — then the key does it), recording stops, an
+    /// error opens Settings. Everything else is inert.
+    private func tapped() {
+        switch state {
+        case .idle:       if model.trigger != .hold { model.toggleRecording() }
+        case .recording:  model.stopRecording()
+        case .error:      model.handleWidgetErrorAction()
+        default:          break
+        }
     }
 
-    // MARK: Idle (icon-only, expands on hover)
+    private var contents: [AnyView] {
+        var items: [AnyView] = [AnyView(dot)]
 
-    private var idlePill: some View {
-        let mic = AnyView(circle(Theme.sage, 24) { SolarIcon(name: Solar.mic, size: 13, color: Theme.card) })
-        var items: [AnyView] = [mic]
-        if hovering {
-            items.append(AnyView(Text(model.trigger.widgetLabel).font(Typo.font(13, 700)).foregroundColor(Theme.sageDeep)))
-            if model.trigger != .click {   // no keycap for click mode ("no keys")
-                items.append(AnyView(Keycap(text: model.trigger.combo, fontSize: 11, hPad: 8, vPad: 3)))
+        if showsLabel {
+            items.append(AnyView(
+                Text(label)
+                    .font(Typo.font(labelSize, 700))
+                    .monospacedDigit()
+                    .foregroundColor(labelInk)
+                    .fixedSize()
+            ))
+        }
+        // The keycap is an idle-only hint, and only when there is a key to press.
+        if case .idle = state, hovering, model.trigger != .click {
+            items.append(AnyView(Keycap(text: model.trigger.combo, fontSize: 11, hPad: 8, vPad: 3)))
+        }
+        if case .error(let failure) = state, !failure.action.isEmpty {
+            items.append(AnyView(
+                Text(failure.action).font(Typo.font(12, 800)).foregroundColor(Theme.marigold)
+            ))
+        }
+        // Discard is only ever offered while something is being recorded.
+        if case .recording = state {
+            items.append(AnyView(cancelButton))
+        }
+        return items
+    }
+
+    private var dot: some View {
+        ZStack {
+            Circle().fill(dotFill)
+            SolarIcon(name: dotIcon, size: dotIconSize, color: dotInk)
+        }
+        .frame(width: dotSize, height: dotSize)
+        .modifier(DotPulse(duration: pulseDuration))
+        .animation(.easeInOut(duration: 0.22), value: dotSize)
+        .animation(.easeInOut(duration: 0.22), value: dotFill)
+    }
+
+    private var cancelButton: some View {
+        Button { model.cancelRecording() } label: {
+            ZStack {
+                Circle().fill(Theme.barOnDark).frame(width: 22, height: 22)
+                Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+                    .foregroundColor(Theme.inkMutedOnDark)
             }
+            .frame(width: 22, height: 22)
         }
-        return widgetShadow(
-            pillRow(spacing: 9, items)
-                .padding(hovering
-                         ? EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
-                         : EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6))
-                .background(Capsule().fill(Theme.card))
-        )
-        .contentShape(Capsule())
-        .onHover { h in withAnimation(.easeOut(duration: 0.16)) { hovering = h } }
-        .onTapGesture { if model.trigger != .hold { model.toggleRecording() } }
+        .buttonStyle(.plain)
+        .help("Discard — don't save or transcribe")
     }
 
-    // MARK: Recording (stop + cancel)
+    // MARK: Per-state values
 
-    private var recordingPill: some View {
-        let stop = AnyView(
-            Button { model.stopRecording() } label: {
-                ZStack {
-                    Circle().fill(Theme.marigold).frame(width: 22, height: 22).pulsing(1.5)
-                    SolarIcon(name: Solar.stop, size: 10, color: Theme.ink)
-                }.frame(width: 22, height: 22)
-            }.buttonStyle(.plain)
-        )
-        let label = AnyView(
-            Text("Listening  \(Clip.formatSeconds(model.elapsed))")
-                .font(Typo.font(12.5, 700))
-                .monospacedDigit()
-                .foregroundColor(Theme.marigold)
-        )
-        let cancel = AnyView(
-            Button { model.cancelRecording() } label: {
-                ZStack {
-                    Circle().fill(Theme.barOnDark).frame(width: 22, height: 22)
-                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
-                        .foregroundColor(Theme.inkMutedOnDark)
-                }.frame(width: 22, height: 22)
-            }.buttonStyle(.plain)
-            .help("Discard — don't save or transcribe")
-        )
-        return widgetShadow(
-            pillRow(spacing: 9, [stop, label, cancel])
-                .padding(EdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 10))
-                .background(Capsule().fill(Theme.ink))
-        )
-        .contentShape(Capsule())
-    }
-
-    // MARK: Transcribing
-
-    private var transcribingPill: some View {
-        let dot = AnyView(circle(Theme.marigold, 24) { SolarIcon(name: Solar.textSquare, size: 13, color: Theme.card) }.pulsing(1.1))
-        let label = AnyView(Text("Transcribing…").font(Typo.font(13, 700)).foregroundColor(Theme.sageDeep))
-        return widgetShadow(
-            pillRow(spacing: 9, [dot, label])
-                .padding(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                .background(Capsule().fill(Theme.card))
-        )
-    }
-
-    // MARK: Queued
-
-    private var queuedPill: some View {
-        let dot = AnyView(circle(Theme.sagePale, 22) { SolarIcon(name: Solar.history, size: 12, color: Theme.sageDeep) })
-        let label = AnyView(Text(TranscriptionFailure.network.message).font(Typo.font(12, 700)).foregroundColor(Theme.inkOnDark))
-        return widgetShadow(
-            pillRow(spacing: 9, [dot, label])
-                .padding(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                .background(Capsule().fill(Theme.ink))
-        )
-    }
-
-    // MARK: Error
-
-    private func errorPill(_ failure: TranscriptionFailure) -> some View {
-        let dot = AnyView(circle(Theme.marigold, 22) { SolarIcon(name: Solar.danger, size: 12, color: Theme.ink) })
-        var items: [AnyView] = [dot, AnyView(Text(failure.message).font(Typo.font(12, 700)).foregroundColor(Theme.inkOnDark))]
-        if !failure.action.isEmpty {
-            items.append(AnyView(Text(failure.action).font(Typo.font(12, 800)).foregroundColor(Theme.marigold)))
+    private var pillBackground: Color {
+        switch state {
+        case .idle, .transcribing: return Theme.card
+        default:                   return Theme.ink
         }
-        return widgetShadow(
-            pillRow(spacing: 9, items)
-                .padding(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-                .background(Capsule().fill(Theme.ink))
-        )
-        .contentShape(Capsule())
-        .onTapGesture { model.handleWidgetErrorAction() }
+    }
+
+    private var padding: EdgeInsets {
+        switch state {
+        case .idle:
+            return hovering
+                ? EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+                : EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 6)
+        case .recording:
+            return EdgeInsets(top: 8, leading: 10, bottom: 8, trailing: 10)
+        default:
+            return EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12)
+        }
+    }
+
+    /// `EdgeInsets` isn't `Equatable`, so animate on a stand-in that is.
+    private var paddingKey: String {
+        "\(padding.top)-\(padding.leading)"
+    }
+
+    private var dotSize: CGFloat {
+        switch state {
+        case .recording, .queued, .error: return 22
+        case .idle, .transcribing:        return 24
+        }
+    }
+
+    private var dotIconSize: CGFloat {
+        switch state {
+        case .recording:         return 10
+        case .queued, .error:    return 12
+        case .idle, .transcribing: return 13
+        }
+    }
+
+    private var dotFill: Color {
+        switch state {
+        case .idle:   return Theme.sage
+        case .queued: return Theme.sagePale
+        default:      return Theme.marigold
+        }
+    }
+
+    private var dotInk: Color {
+        switch state {
+        case .idle, .transcribing: return Theme.card
+        case .queued:              return Theme.sageDeep
+        default:                   return Theme.ink
+        }
+    }
+
+    private var dotIcon: String {
+        switch state {
+        case .idle:          return Solar.mic
+        case .recording:     return Solar.stop
+        case .transcribing:  return Solar.textSquare
+        case .queued:        return Solar.history
+        case .error:         return Solar.danger
+        }
+    }
+
+    private var pulseDuration: Double? {
+        switch state {
+        case .recording:    return 1.5
+        case .transcribing: return 1.1
+        default:            return nil
+        }
+    }
+
+    /// Idle says nothing until you hover it; every other state has something to report.
+    private var showsLabel: Bool {
+        if case .idle = state { return hovering }
+        return true
+    }
+
+    private var label: String {
+        switch state {
+        case .idle:          return model.trigger.widgetLabel
+        case .recording:     return "Listening  \(Clip.formatSeconds(model.elapsed))"
+        case .transcribing:  return "Transcribing…"
+        case .queued:        return TranscriptionFailure.network.message
+        case .error(let f):  return f.message
+        }
+    }
+
+    private var labelSize: CGFloat {
+        switch state {
+        case .idle, .transcribing: return 13
+        default:                   return 12.5
+        }
+    }
+
+    private var labelInk: Color {
+        switch state {
+        case .idle, .transcribing: return Theme.sageDeep
+        case .recording:           return Theme.marigold
+        default:                   return Theme.inkOnDark
+        }
     }
 
     // MARK: Toast
@@ -195,15 +256,18 @@ struct WidgetView: View {
         .background(Capsule().fill(Theme.ink))
         .shadow(color: Color(hex: 0x2A3129, alpha: 0.18), radius: 9, x: 0, y: 4)
     }
+}
 
-    // MARK: Helper
+/// `fPulse` applied only in the states that call for it. Keyed on the duration so the animation
+/// restarts cleanly when the widget morphs from recording into transcribing.
+private struct DotPulse: ViewModifier {
+    let duration: Double?
 
-    private func circle<Content: View>(_ color: Color, _ size: CGFloat,
-                                       @ViewBuilder _ content: () -> Content) -> some View {
-        ZStack {
-            Circle().fill(color).frame(width: size, height: size)
-            content()
+    func body(content: Content) -> some View {
+        if let duration {
+            content.pulsing(duration).id(duration)
+        } else {
+            content
         }
-        .frame(width: size, height: size)
     }
 }
