@@ -11,10 +11,10 @@ build as `DesignVersion.current` and shown in the sidebar footer.
 
 Nothing pending.
 
-## 1.4.0 — 2026-08-22 — design 4
+## 1.4.0 — 2026-08-22 — design 5
 
-Applies design versions **3** and **4** in full. Two kinds of recording, speaker names that
-persist, and provider-side formatting.
+Applies design versions **3**, **4**, and **5** in full. Two kinds of recording, speaker names
+that persist, provider-side formatting, and two corrections made while building v4.
 
 ### Design v4
 
@@ -59,6 +59,29 @@ persist, and provider-side formatting.
 - **Receipts per-day detail.** Hovering a bar in `Words per day` shows words, typing avoided,
   recordings and meetings, and the day's longest take. *(design v4 §13)*
 
+### Design v5
+
+- **System audio moved from ScreenCaptureKit to a Core Audio process tap.** ScreenCaptureKit can
+  reach system audio, but it is screen-recording-shaped: it asks for the Screen Recording
+  permission, lights the menu-bar capture indicator, and gets periodically re-consented — for an
+  app that never looks at a pixel. A process tap (`AudioHardwareCreateProcessTap`, macOS 14.2+)
+  is the audio-only route: one prompt via `NSAudioCaptureUsageDescription`, no indicator. The
+  tap excludes LoudFlow's own process so the earcons never land in a transcript. Deployment
+  target raised from macOS 13.0 to 14.2 to get it. *(design v5 §1)*
+- **Voices are recognised on-device, for real.** Each named voice keeps a 256-dimensional
+  embedding computed locally (pyannote segmentation + WeSpeaker, via CoreML). A later
+  recording's speakers are matched against it, so a voice you named once is labelled without
+  being asked again. Deepgram still says *when* each speaker spoke; only *who they are* is
+  answered here, and no audio leaves the Mac for that step. It refuses to guess: a match has to
+  clear a cosine distance of 0.45 *and* beat the runner-up by 0.08, or the voice stays
+  `Speaker 2`. *(design v5 §2)*
+- **The rename pen offers voices you already know.** With named voices to choose from, the pen
+  opens a menu of them first, `Type a name…` under a divider, so re-linking one the recogniser
+  wasn't sure about is a click instead of retyping a name you've typed before. *(design v5 §3)*
+- **Speakers card says where the model comes from.** `Matching a voice to one you've named runs
+  on this Mac. The model it needs downloads once, the first time you name someone.` — with
+  fetching and failure states — instead of quietly reaching for the network. *(design v5 §4)*
+
 ### Design v3
 
 - **Retention-swept clips are visible.** Rows, editor metadata, the player strip, and the retry
@@ -79,33 +102,6 @@ persist, and provider-side formatting.
 
 - Design and code changelogs paired, with `DesignVersion.current` compiled into the build and
   shown next to the app version in the sidebar footer. See [`design/SYNC.md`](design/SYNC.md).
-
-### Beyond design v4
-
-Two changes agreed after v4 was written. Both still need an entry in the design changelog — they
-are shipped here but the design side doesn't know about them yet.
-
-- **System audio moved from ScreenCaptureKit to a Core Audio process tap.** ScreenCaptureKit can
-  reach system audio, but it is screen-recording-shaped: it asks for the Screen Recording
-  permission, lights the menu-bar capture indicator, and gets periodically re-consented — for an
-  app that never looks at a pixel. A process tap (`AudioHardwareCreateProcessTap`, macOS 14.2+)
-  is the audio-only route: one prompt via `NSAudioCaptureUsageDescription`, no indicator. The
-  tap excludes LoudFlow's own process so the earcons never land in a transcript. Deployment
-  target raised from macOS 13.0 to 14.2 to get it.
-- **Voices are recognised on-device, for real.** Each named voice keeps a 256-dimensional
-  embedding computed locally (pyannote segmentation + WeSpeaker, via CoreML). A later
-  recording's speakers are matched against it, so a voice you named once is labelled without
-  being asked again. Deepgram still says *when* each speaker spoke; only *who they are* is
-  answered here, and no audio leaves the Mac for that step. **It refuses to guess:** a match has
-  to clear a cosine distance of 0.45 *and* beat the runner-up by 0.08, or the voice stays
-  `Speaker 2`. This makes the existing Settings copy true as written.
-  - The rename pen also became a **pick list** of voices you've already named, so re-linking one
-    the recogniser wasn't sure about is a click rather than retyping.
-  - New copy in the Speakers card, which needs design sign-off: `Matching a voice to one you've
-    named runs on this Mac. The model it needs downloads once, the first time you name someone.`
-    The card also reports `Fetching the voice model…` and a plain failure line. The app says
-    this rather than quietly reaching for the network — the models are fetched from Hugging Face
-    on first use only, and nothing is fetched at all until you have named somebody.
 
 ## 1.3.0 — design 2
 

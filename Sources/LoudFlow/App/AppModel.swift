@@ -629,10 +629,10 @@ final class AppModel: ObservableObject {
     func openClip(_ id: UUID) { selectedId = id; editingTranscript = false; tab = .library }
 
     /// One Copy button, no variants: a meeting copies as labelled blocks, a note copies bare.
+    /// Confirmation is the calling button's own state, not a toast — see `EditorPane.copyTapped`
+    /// and `ClipRowView.copyTapped`.
     func copy(_ clip: Clip) {
         TextInserter.copyToClipboard(clip.copyText(voices: voices.voices))
-        toast = Toast(message: clip.isConversation ? "Copied with speaker names." : "Copied.")
-        scheduleToastDismiss()
     }
 
     func copySelected() {
@@ -640,16 +640,17 @@ final class AppModel: ObservableObject {
         copy(c)
     }
 
+    /// Confirmation is the Save changes button's own state, not a toast — see
+    /// `EditorPane.saveTapped`.
     func saveEdit(_ text: String) {
         guard let idx = clips.firstIndex(where: { $0.id == selectedId }) else { return }
         clips[idx].text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         persist()
-        toast = Toast(message: "Fixed. Audio untouched.")
-        scheduleToastDismiss()
     }
 
     /// Commits edited conversation turns. Speaker and timestamp are untouched — they belong to
-    /// the audio — so only the text of each turn comes back.
+    /// the audio — so only the text of each turn comes back. Confirmation is the Done editing
+    /// button's own label change, not a toast.
     func saveTurns(_ texts: [String]) {
         guard let idx = clips.firstIndex(where: { $0.id == selectedId }),
               var turns = clips[idx].turns else { return }
@@ -659,8 +660,6 @@ final class AppModel: ObservableObject {
         clips[idx].turns = turns
         clips[idx].text = clips[idx].flattenedTurns
         persist()
-        toast = Toast(message: "Fixed. Audio untouched.")
-        scheduleToastDismiss()
     }
 
     func deleteSelected() {

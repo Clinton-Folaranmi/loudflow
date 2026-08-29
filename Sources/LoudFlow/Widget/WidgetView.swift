@@ -1,11 +1,5 @@
 import SwiftUI
 
-/// Reports the widget's intrinsic size so the hosting panel can hug the content.
-struct WidgetSizeKey: PreferenceKey {
-    static var defaultValue: CGSize = .zero
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
-}
-
 /// The floating widget: **one pill that morphs**, not five pills that swap.
 ///
 /// Background and padding animate over 0.22s, the leading dot animates its fill and its size,
@@ -17,7 +11,10 @@ struct WidgetSizeKey: PreferenceKey {
 struct WidgetView: View {
     @ObservedObject var model: AppModel
     var anchorRight: Bool = true
-    var onResize: ((CGSize) -> Void)? = nil
+    /// Called when something that can change how big the pill is has changed. The panel
+    /// re-measures in response and animates its own frame to match — see the note on
+    /// `WidgetPanelController` for why this is a signal, not a size the view reports itself.
+    var onLayoutChanged: (() -> Void)? = nil
     var onDragChanged: ((CGSize) -> Void)? = nil
     var onDragEnded: (() -> Void)? = nil
 
@@ -25,6 +22,10 @@ struct WidgetView: View {
 
     @State private var moved = false
     @State private var hovering = false
+    /// Cancels a pending hover-off so a boundary flicker (mouse sitting right at the pill's
+    /// edge while it grows/shrinks under it) doesn't read as a rapid expand/collapse "shake" —
+    /// see `setHovering`.
+    @State private var hoverOffTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: anchorRight ? .trailing : .leading, spacing: 8) {
@@ -36,12 +37,16 @@ struct WidgetView: View {
         .padding(shadowPad)
         .fixedSize()
         .animation(.easeOut(duration: 0.16), value: model.toast)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(key: WidgetSizeKey.self, value: proxy.size)
-            }
-        )
-        .onPreferenceChange(WidgetSizeKey.self) { onResize?($0) }
+        // Everything that can change how big the pill is. A `GeometryReader` background used to
+        // report the live size here, but that only works while `NSHostingView` is the window's
+        // own contentView — nested one level down (required to avoid the resize crash below),
+        // it silently stops firing past the first layout. Explicit signals on the state that
+        // actually drives size are what's left that's reliable.
+        .onChange(of: hovering) { _ in onLayoutChanged?() }
+        .onChange(of: model.widgetState) { _ in onLayoutChanged?() }
+        .onChange(of: model.toast) { _ in onLayoutChanged?() }
+        .onChange(of: model.trigger) { _ in onLayoutChanged?() }
+        .onChange(of: model.elapsed) { _ in onLayoutChanged?() }
     }
 
     // Drag moves the widget; buttons/taps still fire because the drag needs >6pt of movement.
@@ -66,10 +71,27 @@ struct WidgetView: View {
         .background(Capsule().fill(pillBackground))
         .shadow(color: Color(hex: 0x2A3129, alpha: 0.18), radius: 9, x: 0, y: 4)
         .contentShape(Capsule())
-        .onHover { hovering = $0 }
+        .onHover(perform: setHovering)
         .onTapGesture(perform: tapped)
         .animation(.easeInOut(duration: 0.22), value: paddingKey)
         .animation(.easeInOut(duration: 0.22), value: pillBackground)
+    }
+
+    /// The pill grows on hover, which moves its own edge out from under a mouse sitting right
+    /// on it — the resulting exit/re-entry reads as the expanded state rapidly flickering
+    /// on and off ("shaking"). Entering is instant; leaving waits a beat so a boundary flicker
+    /// can cancel it before it's ever seen.
+    private func setHovering(_ isHovering: Bool) {
+        hoverOffTask?.cancel()
+        if isHovering {
+            hovering = true
+        } else {
+            hoverOffTask = Task {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled else { return }
+                hovering = false
+            }
+        }
     }
 
     /// Idle starts (unless the trigger is hold — then the key does it), recording stops, an

@@ -129,14 +129,14 @@ struct TurnBlockView: View {
         if editing {
             TextField("", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(Typo.font(16, 400))
-                .lineSpacing(16 * 0.55)
+                .font(Typo.font(14, 400))
+                .lineSpacing(14 * 0.55)
                 .foregroundColor(Theme.creamInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(turn.text)
-                .font(Typo.font(16, 400))
-                .lineSpacing(16 * 0.55)
+                .font(Typo.font(14, 400))
+                .lineSpacing(14 * 0.55)
                 .foregroundColor(Theme.creamInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)

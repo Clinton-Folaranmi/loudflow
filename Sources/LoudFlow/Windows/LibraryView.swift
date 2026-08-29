@@ -144,6 +144,8 @@ private struct EditorPane: View {
     @State private var flashBg: Color = Theme.card
     @State private var confirmingDelete = false
     @State private var renamingVoice: Int?
+    @State private var justCopied = false
+    @State private var justSaved = false
 
     init(model: AppModel, clip: Clip) {
         self.model = model
@@ -167,8 +169,7 @@ private struct EditorPane: View {
     private var editingConversation: Bool { clip.isConversation && model.editingTranscript }
 
     private var transcriptLabel: String {
-        if !clip.isConversation { return "TRANSCRIPT · EDITABLE" }
-        return model.editingTranscript ? "TRANSCRIPT · EDITING" : "TRANSCRIPT"
+        editingConversation ? "TRANSCRIPT · EDITING" : "TRANSCRIPT"
     }
 
     var body: some View {
@@ -316,8 +317,8 @@ private struct EditorPane: View {
             ForEach(Array(blocks.enumerated()), id: \.offset) { i, _ in
                 TextField("", text: binding(i), axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(Typo.font(17.5, 400))
-                    .lineSpacing(17.5 * 0.5)
+                    .font(Typo.font(14, 400))
+                    .lineSpacing(14 * 0.5)
                     .foregroundColor(Theme.ink)
                     .padding(.horizontal, 6).padding(.vertical, 4)
                     .background(
@@ -409,23 +410,47 @@ private struct EditorPane: View {
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Button { model.saveEdit(blocks.joined(separator: " ")) } label: {
-                        pill(icon: Solar.check, title: "Save changes",
+                    Button(action: saveTapped) {
+                        pill(icon: Solar.check, title: justSaved ? "Saved" : "Save changes",
                              bg: Theme.ink, fg: Theme.cream, weight: 800)
                     }
                     .buttonStyle(.plain)
+                    .animation(.easeInOut(duration: 0.15), value: justSaved)
                 }
 
-                Button { model.copySelected() } label: {
-                    pill(icon: Solar.copy, title: "Copy",
+                Button(action: copyTapped) {
+                    pill(icon: justCopied ? Solar.check : Solar.copy,
+                         title: justCopied ? "Copied" : "Copy",
                          bg: Theme.creamChip, fg: Theme.creamBody, weight: 700)
                 }
                 .buttonStyle(.plain)
+                .animation(.easeInOut(duration: 0.15), value: justCopied)
             }
 
             Spacer()
 
             deleteControl
+        }
+    }
+
+    /// Confirmation is the button swapping its own icon and label to a checkmark and "Copied" —
+    /// not the widget's toast, which lives elsewhere on screen and doesn't make sense as
+    /// feedback for a button you're looking right at.
+    private func copyTapped() {
+        model.copySelected()
+        justCopied = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            justCopied = false
+        }
+    }
+
+    private func saveTapped() {
+        model.saveEdit(blocks.joined(separator: " "))
+        justSaved = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            justSaved = false
         }
     }
 

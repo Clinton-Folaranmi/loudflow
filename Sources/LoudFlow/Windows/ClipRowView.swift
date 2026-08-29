@@ -14,6 +14,7 @@ struct ClipRowView: View {
     var variant: Variant = .today
 
     @State private var hovering = false
+    @State private var justCopied = false
 
     private var isPlaying: Bool { model.playingId == clip.id }
     private var isSelected: Bool { model.selectedId == clip.id }
@@ -96,6 +97,15 @@ struct ClipRowView: View {
         .onTapGesture { model.openClip(clip.id) }
     }
 
+    private func copyTapped() {
+        model.copy(clip)
+        justCopied = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            justCopied = false
+        }
+    }
+
     @ViewBuilder private var trailingAction: some View {
         if isTranscribing {
             // Copy and retry stay hidden while a row is transcribing — there is nothing to act
@@ -118,19 +128,20 @@ struct ClipRowView: View {
             .buttonStyle(.plain)
         } else {
             // Copy pill — hidden until hover. One button: a meeting copies with speaker names,
-            // a note copies bare.
-            Button { model.copy(clip) } label: {
+            // a note copies bare. Confirmation is the pill's own icon/label swap, not a toast.
+            Button(action: copyTapped) {
                 HStack(spacing: 6) {
-                    SolarIcon(name: Solar.copy, size: 13, color: Theme.body)
-                    Text("Copy").font(Typo.font(11.5, 700)).foregroundColor(Theme.body)
+                    SolarIcon(name: justCopied ? Solar.check : Solar.copy, size: 13, color: Theme.body)
+                    Text(justCopied ? "Copied" : "Copy").font(Typo.font(11.5, 700)).foregroundColor(Theme.body)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(Capsule().fill(Theme.sagePale))
             }
             .buttonStyle(.plain)
-            .opacity(hovering ? 1 : 0)
+            .opacity(hovering || justCopied ? 1 : 0)
             .allowsHitTesting(hovering)
             .animation(.easeInOut(duration: 0.14), value: hovering)
+            .animation(.easeInOut(duration: 0.15), value: justCopied)
         }
     }
 }
