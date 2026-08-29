@@ -4,13 +4,13 @@ Written from the code side, in the format of `CHANGES.md`, ready to paste in abo
 section in Claude Design. Everything here is **already built** — v5 documents decisions taken
 during implementation rather than ahead of it, which is why every section is tagged Built.
 
-Once it's in, set `Applied:` to the commit sha and bump `DesignVersion.current` to 5.
+Once it's in, bump `DesignVersion.current` to 5. The `Applied:` sha is already filled in.
 
 ---
 
 ## v5 — 2026-08-22 — **Applied**
 
-Applied: _pending commit_
+Applied: `c069ad9`
 
 Two corrections to v4 that came out of building it. Both are about being able to keep v4's
 promises rather than changing what it promised — the permission LoudFlow asks for, and whether
