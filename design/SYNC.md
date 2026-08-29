@@ -5,11 +5,18 @@ Two changelogs face each other, and they are the whole process:
 | Where | File | Says |
 |---|---|---|
 | Claude Design | `design_handoff_loudflow/CHANGES.md` | what the design **should** be |
-| This repo | [`design/CHANGES.md`](CHANGES.md) | the last snapshot pulled from there |
+| Claude Design | `design_handoff_loudflow/CODE_CHANGELOG.md` | a copy of what shipped, so the design project can see it |
+| This repo | [`design/CHANGES.md`](CHANGES.md) | the last snapshot pulled from Claude Design |
 | This repo | [`../CHANGELOG.md`](../CHANGELOG.md) | what the app **actually** ships |
 
-`design/CHANGES.md` is a byte copy of the design-side file at the last sync. It exists so that
-`git diff` can answer "what changed in the design this week?" without re-reading the whole spec.
+The mirror runs both ways, because neither side can read the other on its own — Claude Design is
+hosted and has no view of this repo, and the repo has no view of the project except through the
+design MCP. So each side keeps a copy of the other's changelog:
+
+- `design/CHANGES.md` is a byte copy of the design-side file at the last sync, so `git diff` can
+  answer "what changed in the design this week?" without re-reading the whole spec.
+- `CODE_CHANGELOG.md` in the design project is a copy of this repo's `CHANGELOG.md`, so you can
+  read what actually shipped while you are working in Claude Design.
 
 ## The weekly loop
 
@@ -31,6 +38,10 @@ you go; nothing happens on this side.
    so a stale build is visible without opening Xcode.
 5. **Build.** Bump `MARKETING_VERSION` (MINOR per feature batch, PATCH per fix) and
    `CURRENT_PROJECT_VERSION` in `project.yml`, then `./scripts/dev-build.sh`.
+6. **Push back.** Set the design-side `Applied:` line to the commit sha, flip that version's
+   per-section tags to their real status, and re-upload `CHANGELOG.md` as `CODE_CHANGELOG.md`.
+   Writing to the design project always goes through an approval step that lists the exact
+   paths first — that project is yours, and nothing lands in it silently.
 
 Steps 3–5 only happen for a design version that is **fully** applied. A partly-applied version
 leaves the stamp where it is and leaves the sections marked in `CHANGELOG.md` under *Pending*.

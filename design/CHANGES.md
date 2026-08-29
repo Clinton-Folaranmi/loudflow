@@ -1,13 +1,15 @@
 # LoudFlow — design changelog
 
-**Current design version: 4.** The app is at **2**, with parts of 3 already built.
+**Current design version: 5.** The app is at **5** — v3, v4 and v5 are all applied.
 Current prototype: `LoudFlow v4.dc.html` (open in a browser). `LoudFlow v3.dc.html` and
-`LoudFlow.dc.html` are kept for history only — do not build from them.
+`LoudFlow.dc.html` are kept for history only — do not build from them. v5 has no prototype: it
+came out of building v4 rather than ahead of it.
 
 ## How to use this file
 
-Work top-down through the two Pending versions: **v3 first, then v4.** Every section carries its
-own status, because v3 was applied unevenly:
+Nothing is pending. Every version below is applied, and each section carries its own status so
+you can see how it landed. When a new version is added, work top-down through the Pending ones,
+oldest first:
 
 - **Built** — already in the codebase, verified against the Swift source. Skip it.
 - **Not built** — do this.
@@ -19,22 +21,24 @@ exact, same rule as `README.md`. Ask before deviating.
 When you finish a version, set that section's `Applied:` line to the commit sha and bump the
 stamp below.
 
-### The version stamp (not yet in the codebase)
+### The version stamp
 
 ```swift
 // Sources/LoudFlow/DesignSystem/DesignVersion.swift
 enum DesignVersion {
     /// The design changelog version this build implements. Bump when a version is applied.
-    static let current = 2
+    static let current = 5
 }
 ```
 
-Show it next to the app version in the sidebar's footer line while the design is in flux —
-`LoudFlow 1.0 (1) · design 2` — so a stale build is visible without opening Xcode.
+It is in the codebase, shown next to the app version in the sidebar's footer line while the
+design is in flux — `LoudFlow 1.4.0 (10) · design 5` — so a stale build is visible without
+opening Xcode.
 
-### Audit — 2026-08-22
+### Audit — 2026-08-22 — **superseded**
 
-Read against `Sources/LoudFlow` at the time of writing:
+Kept for history. This was read against `Sources/LoudFlow` before v3 and v4 were applied, and
+every gap it names is now closed. It is accurate about the moment it describes and nothing else.
 
 - **v3 §1 retention-swept clips — not built.** `Clip.audioDeleted` exists and is set by
   `sweepRetention()` and honoured by `play()` / `retryTranscription()`, but no view reads it.
@@ -55,19 +59,95 @@ Read against `Sources/LoudFlow` at the time of writing:
 
 ---
 
-## v4 — 2026-08-22 — **Pending**
+## v5 — 2026-08-22 — **Applied**
 
-Applied: _not yet_
+Applied: `c069ad9`
+
+Two corrections to v4 that came out of building it. Both are about being able to keep v4's
+promises rather than changing what it promised — the permission LoudFlow asks for, and whether
+a named voice is really recognised next time.
+
+### 1. System audio comes from a Core Audio tap, not ScreenCaptureKit — **Built**
+new `Audio/SystemAudioTap.swift`, `Audio/AudioRecorder.swift`, `Resources/Info.plist`, `project.yml`
+
+v4 §1 said to record system audio as its own track but not how. ScreenCaptureKit is the obvious
+route and the wrong one: it is screen-recording-shaped. It asks for the **Screen Recording**
+permission, lights the capture indicator in the menu bar, and gets re-consented periodically —
+all for an app that never looks at a pixel. Asking for a permission broader than what you do is
+the same failure as overclaiming in copy.
+
+- Capture system audio with a **Core Audio process tap** (`AudioHardwareCreateProcessTap` /
+  `CATapDescription`), riding a private aggregate device on the default output.
+- The permission is audio-only, prompted once via `NSAudioCaptureUsageDescription`:
+  `LoudFlow records the other side of your calls, so a conversation's transcript can say who said what.`
+- The tap is **global minus LoudFlow's own process**, so the earcons can never land in a
+  transcript. `muteBehavior` is `.unmuted` — you still hear the call while it records.
+- Refusing the permission, or nothing playing, falls back to a mono clip. A note is still a note.
+- This raises the deployment target from **macOS 13.0 to 14.2**, which is where taps arrive.
+
+### 2. Voices are recognised on-device — **Built**
+new `App/VoiceRecognizer.swift`, `App/Voices.swift`, `AppModel.swift`
+
+v4 §2 said a named voice is recognised the next time it turns up. Nothing in the transcription
+path can do that: a provider's diarization separates voices *within* one recording and has no
+idea that today's speaker 1 is last Tuesday's. Left there, the Settings line would have been an
+overclaim. So the app does it itself, locally.
+
+- Each **named** voice keeps a 256-dimensional embedding — a voice fingerprint — computed on
+  this Mac from up to 12 seconds of that speaker's turns in the recording it was named in.
+- A later recording's unnamed speakers are embedded the same way and compared. The provider
+  still says *when* each speaker spoke; only *who they are* is answered here, and no audio
+  leaves the Mac for that step.
+- **It refuses to guess.** A match must be within a cosine distance of **0.45** *and* beat the
+  runner-up by **0.08**. Below that the voice stays `Speaker 2` for you to name. A wrong name
+  written on a transcript is worse than no name, and the two thresholds are the whole difference
+  between the two.
+- One clip can never map two speakers onto the same voice.
+- Nothing runs and nothing is fetched until at least one voice has been named — until then there
+  is nobody to recognise.
+- Models are pyannote segmentation plus a WeSpeaker embedder, as CoreML, via **FluidAudio**
+  (Apache 2.0, pinned to 0.15.6). They download once on first use and are cached from then on.
+
+### 3. The rename pen offers voices you already know — **Built**
+`Windows/TurnBlockView.swift`
+
+v4 §3's pen opens a text field. It still does, but when there are names to choose from it opens
+a **menu of them** first, with `Type a name…` under a divider. Re-linking a voice the recogniser
+wasn't sure about is one click instead of retyping a name you have typed before.
+
+Voices already speaking in that clip are left out of the list — the same person can't be two
+speakers in one conversation. With no named voices yet, the pen behaves exactly as v4 describes.
+
+### 4. Speakers card says where the model comes from — **Built**
+`Windows/SettingsView.swift`
+
+Recognition runs on this Mac, but the model has to arrive from somewhere once, and the app says
+so rather than quietly reaching for the network. Under the existing card copy, at 12px `#A08A5C`:
+
+`Matching a voice to one you've named runs on this Mac. The model it needs downloads once, the first time you name someone.`
+
+While fetching, that line reads `Fetching the voice model…`. If it fails:
+`Couldn't fetch the voice model, so voices won't be recognised on their own yet. Naming one still works.`
+
+The v4 §12 line — `Voices you've named are recognised the next time they turn up.` — is
+**unchanged**, because as of §2 it is now true as written.
+
+---
+
+## v4 — 2026-08-22 — **Applied**
+
+Applied: `c069ad9`
 
 Speaker identification, formatting, and a second kind of recording. This is the largest batch so
 far and it changes the app's shape: LoudFlow is now two things — short dictation ("notes") and
 recorded conversations ("meetings") — distinguished by **how many voices are in the recording**,
 never by a mode the user sets.
 
-Apply v3 first — parts of it are still missing. Where v4 contradicts v3, v4 wins. **Nothing in
-v4 is built yet**; the per-section tags say which Swift files each one lands in.
+Applied together with v3. Where v4 contradicts v3, v4 wins. All thirteen sections are built; the
+per-section tags say which Swift files each one landed in. Two decisions taken while building it
+became **v5**.
 
-### 1. Diarization and a second recording kind — **Not built**
+### 1. Diarization and a second recording kind — **Built**
 `Clip.swift`, `Domain.swift`, `Transcription/`
 
 - Request **diarization** from the provider (Deepgram `diarize=true`; the Whisper path needs an
@@ -81,7 +161,7 @@ v4 is built yet**; the per-section tags say which Swift files each one lands in.
   tracks**. Speaker 0 is always the mic, so "You" is never a guess; diarization only has to
   split the remote side. This is not a user setting — it is how recording works.
 
-### 2. Voice profiles — **Not built**
+### 2. Voice profiles — **Built**
 new `App/Voices.swift`, `SettingsView.swift`
 
 Voices persist **across recordings** via a stored voice profile, so a name given once is reused.
@@ -102,7 +182,7 @@ Voices persist **across recordings** via a stored voice profile, so a name given
 
   Marigold is **not** used for a speaker — it stays the playhead and selection color.
 
-### 3. Conversation transcript — **Not built**
+### 3. Conversation transcript — **Built**
 `LibraryView.swift`, new `Windows/TurnBlockView.swift`
 
 A conversation renders as turn blocks; a note keeps the flowing sentence text from v3.
@@ -128,14 +208,14 @@ A conversation renders as turn blocks; a note keeps the flowing sentence text fr
 - Playback highlights the current turn and auto-scrolls to keep it visible, never while the
   caret is in the field.
 
-### 4. Notes transcript — remove per-sentence playback — **Not built**
+### 4. Notes transcript — remove per-sentence playback — **Built**
 `LibraryView.swift`
 
 The gutter play handle, the hover tint, and click-to-seek are **removed** from note sentences —
 a 14-second clip doesn't need them and the scrubber covers it. Sentences sit flush as plain
 editable text. The active-sentence highlight during playback stays.
 
-### 5. Scrubber — **Not built**
+### 5. Scrubber — **Built**
 `LibraryView.swift`
 
 The editor's progress track is now a real scrubber: a **16px** `#E8B930` knob with a 2px
@@ -143,7 +223,7 @@ The editor's progress track is now a real scrubber: a **16px** `#E8B930` knob wi
 on the track to seek. The position belongs to the clip, survives pausing, and resumes from where
 it stopped; playing to the end leaves the knob at the end rather than snapping back.
 
-### 6. Library rows and filters — **Not built**
+### 6. Library rows and filters — **Built**
 `ClipRowView.swift`, `LibraryView.swift`
 
 - The leading circle now shows **what kind of recording it is**, and morphs to play on hover:
@@ -157,14 +237,14 @@ it stopped; playing to the end leaves the knob at the end rather than snapping b
   `#5C6659` text. Switching filters keeps the selected clip if it is still in the list,
   otherwise selects the first, and leaves edit mode.
 
-### 7. Copy follows the clip — **Not built**
+### 7. Copy follows the clip — **Built**
 `LibraryView.swift`, `ClipRowView.swift`
 
 One `Copy` button, no variants. A meeting copies as `{Speaker}: {text}` blocks separated by
 blank lines; a note copies the bare words. Toasts: `Copied with speaker names.` for a meeting,
 `Copied.` for a note.
 
-### 8. Formatting is not a setting — **Not built, and contradicted in code**
+### 8. Formatting is not a setting — **Built**
 `SettingsView.swift`, `DeepgramTranscriber.swift`, `Domain.swift`
 
 Punctuation, paragraph breaks at natural pauses, and number/date/currency formatting are
@@ -175,7 +255,7 @@ out of. Remove the `Add punctuation` toggle. Request smart formatting from the p
 The v1 principle stands and should be restated as **"no rewording, ever"** — no tone presets, no
 LLM cleanup. Formatting is not rewording.
 
-### 9. Editor pane fills its height — **Not built**
+### 9. Editor pane fills its height — **Built**
 `LibraryView.swift`
 
 The transcript scrolled early because it was capped at a fixed height. The editor card is
@@ -183,7 +263,7 @@ The transcript scrolled early because it was capped at a fixed height. The edito
 once the text passes the bottom. In SwiftUI terms: no fixed `maxHeight` on the transcript — let
 it take the remaining space in the column.
 
-### 10. The widget is one morphing pill — **Not built**
+### 10. The widget is one morphing pill — **Built**
 `WidgetView.swift`, `WidgetPanel.swift`
 
 Today each state is its own pill and they slide in and out of view. Replace that with **one
@@ -204,7 +284,7 @@ Per state — background, padding, dot size, dot fill, dot icon, label:
 Clicking the pill: idle starts (except in hold mode), recording stops, error opens Settings. The
 ✕ discard button shows only while recording.
 
-### 11. Sounds — **Not built**
+### 11. Sounds — **Built**
 new `Audio/Earcons.swift`
 
 Three short synthesized tones, no audio files:
@@ -217,7 +297,7 @@ Each is a **triangle** wave with a 4ms linear attack, a linear decay to true zer
 at 3× the fundamental. Peak gain 0.3 for record/stop, 0.22/0.26 for the chime. (An exponential
 decay tail reads as an echo — keep it linear.) No setting; sounds are on.
 
-### 12. Settings copy and structure — **Not built**
+### 12. Settings copy and structure — **Built**
 `SettingsView.swift`, `Domain.swift`
 
 - `Keep the audio, not just the text` → **`Keep the audio`**.
@@ -249,7 +329,7 @@ decay tail reads as an echo — keep it linear.) No setting; sounds are on.
   keycaps, toggle labels, retention pills, provider names. (In the prototype, generated text
   can't be edited in place; in the app this just means no needless indirection.)
 
-### 13. Receipts — per-day detail on hover — **Not built**
+### 13. Receipts — per-day detail on hover — **Built**
 `ReceiptsView.swift`, `AppModel.swift`
 
 Hovering a bar in `Words per day` turns it marigold and shows a `#2A3129` panel, radius 14px,
@@ -270,14 +350,14 @@ leave it for now; it is being reconsidered.
 
 ---
 
-## v3 — 2026-08-22 — **Pending** (partly built — see the per-section status)
+## v3 — 2026-08-22 — **Applied**
 
-Applied: _not yet_
+Applied: `c069ad9`
 
 Six changes. The first two are the substantial ones; the rest close gaps between the shipped
 app and the design.
 
-### 1. Retention-swept clips need a visible state — **Not built**
+### 1. Retention-swept clips need a visible state — **Built**
 `ClipRowView.swift`, `LibraryView.swift`
 
 `Clip.audioDeleted` is set by `sweepRetention()` and read by `play()` and
@@ -300,11 +380,13 @@ audio is gone is to press play and get a toast. Design now covers it:
 - Existing toasts are unchanged and still correct
   (`That audio was cleared by retention. Transcript stays.` / `Audio was cleared — can't retry.`).
 
-### 2. Widget drag and edge snapping — **Verify**
+### 2. Widget drag and edge snapping — **Built**
 `WidgetPanel.swift`, `SnapGuide.swift`, `WidgetView.swift`
 
-The behavior is already implemented; this pins the visuals the prototype now shows, so the two
-match. Verify against the prototype and change only what differs:
+The behavior was already implemented; this pinned the visuals the prototype now shows. The rails
+matched, but two things did not and were corrected: the snap inset was 2pt against the 26pt
+below, and the cross-axis position was unclamped, so a widget dropped in a corner jammed against
+both edges.
 
 - Snap rails: inactive `#7E9A82` at 40% opacity, 4px thick; the target rail `#E8B930`, 6px.
   Left/right rails are 55% of screen height, centered, 8px from the edge; the bottom rail is
@@ -314,7 +396,7 @@ match. Verify against the prototype and change only what differs:
 - Docked left flips the pill contents to `row` (icon leads); right and bottom stay
   `row-reverse`, so content always unfurls inward. Toast alignment follows the dock.
 
-### 3. In-row transcribing pill — **Not built**
+### 3. In-row transcribing pill — **Built**
 `ClipRowView.swift`
 
 Replace the indeterminate `ProgressView()` with a 12px ring: 2px border `#EAF0E7`, top edge
@@ -322,7 +404,7 @@ Replace the indeterminate `ProgressView()` with a 12px ring: 2px border `#EAF0E7
 11.5px/700 `#8A9188`, padding `6px 10px`, no background fill. Copy and retry pills stay hidden
 while a row is transcribing.
 
-### 4. Library empty states and list edge fades — **Verify** (strings already present)
+### 4. Library empty states and list edge fades — **Built**
 `LibraryView.swift`
 
 Note: v4 adds filter chips above this list and changes the row's leading icon — build v4's
@@ -342,7 +424,7 @@ Matches `LiveWaveBars` as built (12 bars, gap 3, height 30, center-weighted, min
 and the label switch at level > 0.1 (`Hearing you` / `Say something…`). No change expected —
 listed so the prototype and app can be diffed on it.
 
-### 6. Onboarding modal height and copy — **Not built**
+### 6. Onboarding modal height and copy — **Built**
 `OnboardingView.swift`
 
 The modal currently grows and shrinks as you step through it. Fix the two variable blocks so

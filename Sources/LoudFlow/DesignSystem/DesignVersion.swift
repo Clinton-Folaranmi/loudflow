@@ -8,5 +8,5 @@ import Foundation
 ///
 /// See `design/SYNC.md` for the weekly loop this belongs to.
 enum DesignVersion {
-    static let current = 4
+    static let current = 5
 }
