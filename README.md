@@ -9,7 +9,7 @@ are kept locally so you can open the app and fix a mis-heard name or number.
 
 ## Build & run
 
-Prerequisites: macOS 13+, Xcode 15+, and [XcodeGen](https://github.com/yoneraiken/xcodegen)
+Prerequisites: macOS 14.2+, Xcode 15+, and [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 (`brew install xcodegen`).
 
 ```bash
@@ -42,7 +42,7 @@ lets an OpenAI Whisper adapter slot in (`Sources/LoudFlow/Transcription/`).
 
 ```
 Sources/LoudFlow/
-  LoudFlowApp.swift        @main — menu-bar residency, main window, floating widget panel
+  LoudFlowApp.swift        @main — app lifecycle, main window, floating widget panel (no menu-bar item)
   App/                     AppModel (central state), Persistence (JSON + audio), Keychain, Preferences
   Audio/                   AudioRecorder (→ .m4a on disk), AudioPlayer (progress)
   Transcription/           Transcriber protocol, DeepgramTranscriber, WhisperTranscriber, TranscriptionQueue
