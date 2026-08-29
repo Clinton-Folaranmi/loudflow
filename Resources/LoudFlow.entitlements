@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  LoudFlow is intentionally NOT sandboxed.
+
+	  The App Sandbox blocks the two things this app is built around:
+	    • global CGEventTap hotkeys (hold ⌥Space / double-tap ⌃), and
+	    • typing the transcript into the frontmost app via the Accessibility API.
+
+	  Those require the app to be a normal (non-sandboxed) macOS app that the user
+	  grants Accessibility permission to under System Settings > Privacy & Security.
+
+	  App Sandbox is therefore disabled. If you later sandbox this, the hold /
+	  double-tap triggers and cross-app text insertion will stop working — only
+	  "click the widget" + "clipboard only" would remain.
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+
+	<!-- Microphone access (also gated by the Info.plist usage string + TCC prompt). -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+
+	<!-- Outbound network for cloud transcription. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

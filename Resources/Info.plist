@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>LoudFlow</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+
+	<!-- App icon, compiled from Assets.xcassets/AppIcon.appiconset into Assets.car. -->
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Personal build</string>
+
+	<!-- Bundled Nunito fonts (weights 400–800) live in Resources/Fonts. -->
+	<key>ATSApplicationFontsPath</key>
+	<string>Fonts</string>
+
+	<!-- The app is a menu-bar / floating-widget utility. It manages its own
+	     activation policy at runtime (AppModel), so it does not force LSUIElement here;
+	     onboarding shows on first run with a normal Dock presence. -->
+	<key>LSUIElement</key>
+	<false/>
+
+	<!-- Microphone: required to record dictation. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>LoudFlow records your voice so it can be transcribed into text.</string>
+
+	<!-- Speech recognition entitlement string is not used (cloud transcription),
+	     but Accessibility (System Settings > Privacy) is requested at runtime for
+	     global hotkeys and typing text into other apps. No usage string key exists
+	     for Accessibility; the app prompts via AXIsProcessTrustedWithOptions. -->
+
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<!-- Transcription uses HTTPS (Deepgram / OpenAI). No cleartext needed. -->
+		<key>NSAllowsArbitraryLoads</key>
+		<false/>
+	</dict>
+</dict>
+</plist>

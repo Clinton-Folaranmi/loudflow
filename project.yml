@@ -1,0 +1,43 @@
+name: LoudFlow
+options:
+  bundleIdPrefix: com.loudflow
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # Semantic version MAJOR.MINOR.PATCH. Bump MINOR per feature batch, PATCH per fix.
+    MARKETING_VERSION: "1.3.0"
+    CURRENT_PROJECT_VERSION: "9"
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_LANGUAGE: en
+    # Personal/local build: ad-hoc "Sign to Run Locally". Set your own team in Xcode if you
+    # notarize. Accessibility permission is tied to the signature, so with ad-hoc signing you
+    # may need to re-grant Accessibility after a rebuild.
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "YES"
+    ENABLE_HARDENED_RUNTIME: NO
+
+targets:
+  LoudFlow:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      # Asset catalog (compiled to Assets.car) and bundled fonts. XcodeGen classifies these
+      # as resources automatically. Info.plist / entitlements are referenced via build
+      # settings below, not listed here, so they aren't copied as loose resources.
+      - path: Resources/Assets.xcassets
+      # Folder reference so the bundle keeps a real Contents/Resources/Fonts/ directory,
+      # which is what ATSApplicationFontsPath ("Fonts") auto-registers at launch.
+      - path: Resources/Fonts
+        type: folder
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.loudflow.app
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/LoudFlow.entitlements
+        COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
