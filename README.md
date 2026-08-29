@@ -5,17 +5,6 @@ you're using. Click it (or hold a key / double-tap Control), talk, and when you 
 types the **raw transcript** straight into the field your cursor is in. Audio and transcript
 are kept locally so you can open the app and fix a mis-heard name or number.
 
-Three things are deliberate:
-
-1. **No tone presets, no rewriting, no LLM cleanup.** Raw transcript plus optional
-   punctuation (capitalize the first letter, add a full stop). Nothing else, ever.
-2. **No live transcription while recording.** Just a waveform and a timer, then a brief
-   "Writing it out…" state, then the text lands.
-3. **Clips are stored on this Mac; transcription runs in the cloud** (Deepgram by default).
-   This is an accuracy-over-privacy choice made on purpose. Audio is sent to the provider
-   with a **zero-retention** request and nothing is kept there. The UI says "kept here,
-   transcribed in the cloud" — there is intentionally **no** "never leaves your Mac" claim.
-
 ---
 
 ## Build & run
