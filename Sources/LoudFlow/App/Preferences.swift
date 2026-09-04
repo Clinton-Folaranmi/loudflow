@@ -14,6 +14,7 @@ enum Preferences {
         static let onboarded = "onboarded"
         static let wordsToday = "wordsToday"
         static let wordsTodayDay = "wordsTodayDay"   // yyyy-ddd to reset the counter daily
+        static let vocabulary = "vocabulary"
     }
 
     static var trigger: TriggerMode {
@@ -80,6 +81,14 @@ enum Preferences {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f
     }()
     private static var todayStamp: String { dayStampFormatter.string(from: Date()) }
+
+    /// Names, jargon and spellings to bias transcription toward. Sent to whichever provider is
+    /// active — see `Transcriber.transcribe(_:twoTrack:vocabulary:)`. Order is preserved so the
+    /// Settings list doesn't reshuffle as you add to it.
+    static var vocabulary: [String] {
+        get { d.stringArray(forKey: Key.vocabulary) ?? [] }
+        set { d.set(newValue, forKey: Key.vocabulary) }
+    }
 
     /// The floating widget's saved bottom-left origin (screen coords), or nil to use the
     /// default bottom-right position.

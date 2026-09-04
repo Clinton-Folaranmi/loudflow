@@ -10,8 +10,8 @@ options:
 settings:
   base:
     # Semantic version MAJOR.MINOR.PATCH. Bump MINOR per feature batch, PATCH per fix.
-    MARKETING_VERSION: "1.4.0"
-    CURRENT_PROJECT_VERSION: "10"
+    MARKETING_VERSION: "1.5.0"
+    CURRENT_PROJECT_VERSION: "11"
     SWIFT_VERSION: "5.9"
     DEVELOPMENT_LANGUAGE: en
     # Personal/local build: ad-hoc "Sign to Run Locally". Set your own team in Xcode if you

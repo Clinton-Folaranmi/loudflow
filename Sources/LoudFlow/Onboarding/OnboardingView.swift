@@ -70,6 +70,7 @@ struct OnboardingView: View {
                         Text(step == 0 ? "Skip all this" : "Back")
                             .font(Typo.font(13.5, 700)).foregroundColor(Theme.muted)
                     }.buttonStyle(.plain)
+                    .clickable()
 
                     Spacer()
 
@@ -80,6 +81,7 @@ struct OnboardingView: View {
                             .background(Capsule().fill(Theme.ink))
                     }
                     .buttonStyle(.plain)
+                    .clickable(if: !nextDisabled)
                     .disabled(nextDisabled)
                     .opacity(nextDisabled ? 0.5 : 1)
                 }
@@ -137,6 +139,7 @@ struct OnboardingView: View {
                         .stroke(model.trigger == t ? Theme.marigold : Theme.hairline, lineWidth: 2))
                 }
                 .buttonStyle(.plain)
+                .clickable()
             }
         }
     }
@@ -153,6 +156,7 @@ struct OnboardingView: View {
                             .background(Capsule().fill(model.provider == p ? Theme.marigoldPale : Theme.sagePale2))
                             .overlay(Capsule().stroke(model.provider == p ? Theme.marigold : .clear, lineWidth: 1.5))
                     }.buttonStyle(.plain)
+                    .clickable()
                 }
                 Spacer()
                 if model.hasKey {
@@ -187,6 +191,7 @@ struct OnboardingView: View {
                         .stroke(model.retention == r ? Theme.marigold : Theme.hairline, lineWidth: 2))
                 }
                 .buttonStyle(.plain)
+                .clickable()
             }
         }
     }

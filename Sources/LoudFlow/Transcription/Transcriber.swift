@@ -34,7 +34,13 @@ protocol Transcriber {
     ///
     /// `twoTrack` says the file has the microphone on channel 0 and system audio on channel 1,
     /// so the provider can be asked to keep the channels apart instead of guessing who is who.
-    func transcribe(_ audioURL: URL, twoTrack: Bool) async throws -> TranscriptionResult
+    ///
+    /// `vocabulary` is names, jargon and spellings to bias decoding toward — see
+    /// `AppModel.effectiveVocabulary`, which is what's actually passed in (the user's own list
+    /// plus every named voice, so naming someone helps their own transcript for free). Each
+    /// adapter maps it onto whatever hint mechanism its provider offers; an empty list is a
+    /// no-op either way.
+    func transcribe(_ audioURL: URL, twoTrack: Bool, vocabulary: [String]) async throws -> TranscriptionResult
     /// Cheap best-effort check that the stored key is accepted.
     func validateKey() async -> Bool
 }

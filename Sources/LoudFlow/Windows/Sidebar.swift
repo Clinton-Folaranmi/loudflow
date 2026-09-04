@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct Sidebar: View {
     @ObservedObject var model: AppModel
@@ -38,20 +39,8 @@ struct Sidebar: View {
 
             Rectangle().fill(Theme.hairline).frame(height: 1)
 
-            // Storage
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 7) {
-                    SolarIcon(name: Solar.database, size: 14, color: Theme.muted)
-                    Text("ON THIS MAC")
-                        .font(Typo.font(11, 700))
-                        .tracking(0.08 * 11)
-                        .foregroundColor(Theme.muted)
-                }
-                ProgressTrack(fraction: model.storageFraction, height: 6)
-                Text(model.storageLabel)
-                    .font(Typo.font(12, 400))
-                    .foregroundColor(Theme.body)
-            }
+            // Storage — opens the folder the recordings actually live in.
+            StorageButton(model: model)
 
             // Version
             Text(Self.versionString)
@@ -111,6 +100,42 @@ private struct NavRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 11))
         .onHover { hovering = $0 }
         .onTapGesture { model.tab = tab }
+        .clickable()
+    }
+}
+
+/// The "ON THIS MAC" storage meter, doubling as a button to `audio/` in Finder — the folder the
+/// recordings actually live in, not just a number about them.
+private struct StorageButton: View {
+    @ObservedObject var model: AppModel
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            NSWorkspace.shared.open(Persistence.shared.audioURL)
+        } label: {
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 7) {
+                    SolarIcon(name: Solar.database, size: 14, color: Theme.muted)
+                    Text("ON THIS MAC")
+                        .font(Typo.font(11, 700))
+                        .tracking(0.08 * 11)
+                        .foregroundColor(Theme.muted)
+                }
+                ProgressTrack(fraction: model.storageFraction, height: 6)
+                Text(model.storageLabel)
+                    .font(Typo.font(12, 400))
+                    .foregroundColor(Theme.body)
+            }
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 8).fill(hovering ? Theme.sagePale2 : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .clickable()
+        .help("Show the recordings folder in Finder")
     }
 }
 

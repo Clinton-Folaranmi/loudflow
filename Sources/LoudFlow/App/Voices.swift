@@ -85,10 +85,17 @@ final class VoiceStore: ObservableObject {
     var listed: [Voice] { voices }
 
     /// The existing named voice for `name`, if there is one (case- and space-insensitive).
+    /// Never matches **You**: folding a remote voice's turns onto the mic track (or the
+    /// reverse) would misattribute them, since `Voice.youID` is what tells `VoiceRecognizer`
+    /// which channel to read — see `AppModel`'s guard against exactly that before it calls in
+    /// here. You's name changes through `AppModel.displayName`, which calls `rename` directly
+    /// rather than going through a lookup that could resolve to a merge.
     func named(_ name: String) -> Voice? {
         let key = name.trimmingCharacters(in: .whitespaces).lowercased()
         guard !key.isEmpty else { return nil }
-        return voices.first { ($0.name ?? "").trimmingCharacters(in: .whitespaces).lowercased() == key }
+        return voices.first {
+            !$0.isYou && ($0.name ?? "").trimmingCharacters(in: .whitespaces).lowercased() == key
+        }
     }
 
     // MARK: Minting
@@ -112,14 +119,21 @@ final class VoiceStore: ObservableObject {
 
     // MARK: Naming
 
-    /// Names a voice. Returns the id the turns should now point at — the same id normally, or
-    /// an existing voice's id when the name matches one you have already named (a merge).
+    /// Names a voice — **including You**, whose name is `AppModel.displayName` mirrored here
+    /// so `Clip.speakerLabel` doesn't need a separate case for it. Returns the id the turns
+    /// should now point at — the same id normally, or an existing voice's id when the name
+    /// matches one you have already named (a merge).
+    ///
+    /// The merge only ever runs for a non-You id: `named` already excludes You as a candidate,
+    /// and this additionally never lets You's own rename (`id == Voice.youID`) take on another
+    /// voice's id — that would silently move every turn the mic ever recorded onto a voice
+    /// that was never on the mic track.
     @discardableResult
     func rename(_ id: Int, to rawName: String) -> Int {
         let name = rawName.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, id != Voice.youID else { return id }
+        guard !name.isEmpty else { return id }
 
-        if let existing = named(name), existing.id != id {
+        if id != Voice.youID, let existing = named(name), existing.id != id {
             // Same person, met again. Fold this recording's voice into the stored profile and
             // drop the duplicate, so there is only ever one "Ada".
             forget(id, deleteSample: true)

@@ -68,6 +68,7 @@ struct ClipRowView: View {
                 .frame(width: playSize, height: playSize)
             }
             .buttonStyle(.plain)
+            .clickable()
             .help(clip.audioDeleted ? "Audio cleared by retention" : "")
 
             VStack(alignment: .leading, spacing: 2) {
@@ -95,6 +96,7 @@ struct ClipRowView: View {
         .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.rowInner))
         .onHover { hovering = $0 }
         .onTapGesture { model.openClip(clip.id) }
+        .clickable()
     }
 
     private func copyTapped() {
@@ -126,6 +128,7 @@ struct ClipRowView: View {
                 .background(Capsule().fill(Theme.marigoldPale))
             }
             .buttonStyle(.plain)
+            .clickable()
         } else {
             // Copy pill — hidden until hover. One button: a meeting copies with speaker names,
             // a note copies bare. Confirmation is the pill's own icon/label swap, not a toast.
@@ -138,6 +141,7 @@ struct ClipRowView: View {
                 .background(Capsule().fill(Theme.sagePale))
             }
             .buttonStyle(.plain)
+            .clickable()
             .opacity(hovering || justCopied ? 1 : 0)
             .allowsHitTesting(hovering)
             .animation(.easeInOut(duration: 0.14), value: hovering)

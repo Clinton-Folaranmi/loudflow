@@ -3,8 +3,9 @@ import SwiftUI
 /// The floating widget: **one pill that morphs**, not five pills that swap.
 ///
 /// Background and padding animate over 0.22s, the leading dot animates its fill and its size,
-/// and only the labels change. Nothing translates vertically — the `fRise` entrance belongs to
-/// the toast and the onboarding modal, not to a state the widget is already showing.
+/// and only the labels change. Nothing translates vertically — `fRise` (a vertical rise) is the
+/// onboarding modal's entrance, not this view's; the toast beside the pill slides in
+/// horizontally instead (`fSlideIn`), from behind the pill outward.
 ///
 /// Everything anchors to the screen edge it lives near (`anchorRight`) so content unfurls
 /// *inward*. Drag (past a small threshold) moves it; a plain tap records.
@@ -28,11 +29,26 @@ struct WidgetView: View {
     @State private var hoverOffTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(alignment: anchorRight ? .trailing : .leading, spacing: 8) {
-            if let toast = model.toast {
-                toastView(toast).transition(.fRise)
+        // Anchored right: the pill stays put on the right and the toast unfurls to its left.
+        // Anchored left: the reverse. Either way the newest content grows inward, away from the
+        // screen edge, the same direction the pill itself grows in.
+        //
+        // The `if let toast` has to sit directly in this builder, not behind a named `some
+        // View` binding (a `Group` included that way) — only a conditional the builder can see
+        // is omitted from the stack's spacing when there's no toast; a stand-in view, even an
+        // empty one, still claims its 8pt gap.
+        HStack(alignment: .center, spacing: 8) {
+            if anchorRight {
+                if let toast = model.toast {
+                    toastView(toast).transition(.fSlideIn(fromTrailing: anchorRight))
+                }
+                pill.simultaneousGesture(dragGesture)
+            } else {
+                pill.simultaneousGesture(dragGesture)
+                if let toast = model.toast {
+                    toastView(toast).transition(.fSlideIn(fromTrailing: anchorRight))
+                }
             }
-            pill.simultaneousGesture(dragGesture)
         }
         .padding(shadowPad)
         .fixedSize()
@@ -73,8 +89,19 @@ struct WidgetView: View {
         .contentShape(Capsule())
         .onHover(perform: setHovering)
         .onTapGesture(perform: tapped)
+        .clickable(if: tapDoesSomething)
         .animation(.easeInOut(duration: 0.22), value: paddingKey)
         .animation(.easeInOut(duration: 0.22), value: pillBackground)
+    }
+
+    /// Whether `tapped()` currently does anything — the pill is inert while transcribing or
+    /// queued, and while idle with the hold trigger (the key does that one, not a click).
+    private var tapDoesSomething: Bool {
+        switch state {
+        case .idle:            return model.trigger != .hold
+        case .recording, .error: return true
+        case .transcribing, .queued: return false
+        }
     }
 
     /// The pill grows on hover, which moves its own edge out from under a mouse sitting right
@@ -154,6 +181,7 @@ struct WidgetView: View {
             .frame(width: 22, height: 22)
         }
         .buttonStyle(.plain)
+        .clickable()
         .help("Discard — don't save or transcribe")
     }
 
@@ -267,16 +295,13 @@ struct WidgetView: View {
     // MARK: Toast
 
     private func toastView(_ toast: Toast) -> some View {
-        HStack(spacing: 10) {
-            Text(toast.message).font(Typo.font(12, 700)).foregroundColor(Theme.inkOnDark)
-            if !toast.action.isEmpty {
-                Text(toast.action).font(Typo.font(12, 700)).foregroundColor(Theme.marigold)
-                    .onTapGesture { if toast.kind == .fixLast { model.fixLast() } }
-            }
-        }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(Capsule().fill(Theme.ink))
-        .shadow(color: Color(hex: 0x2A3129, alpha: 0.18), radius: 9, x: 0, y: 4)
+        Text(toast.message)
+            .font(Typo.font(12, 700))
+            .foregroundColor(Theme.inkOnDark)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Capsule().fill(Theme.ink))
+            .shadow(color: Color(hex: 0x2A3129, alpha: 0.18), radius: 9, x: 0, y: 4)
+            .fixedSize()
     }
 }
 

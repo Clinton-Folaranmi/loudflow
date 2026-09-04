@@ -34,6 +34,7 @@ struct TodayView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .clickable()
                 }
 
                 if model.todayClips.isEmpty {
@@ -42,7 +43,7 @@ struct TodayView: View {
                         .foregroundColor(Theme.placeholder)
                         .padding(.vertical, 8)
                 } else {
-                    ForEach(model.todayClips.prefix(4)) { clip in
+                    ForEach(model.todayClips) { clip in
                         ClipRowView(model: model, clip: clip, variant: .today)
                     }
                 }

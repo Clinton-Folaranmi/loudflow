@@ -16,22 +16,42 @@ import Foundation
 /// recording has two tracks (mic on channel 0, system audio on channel 1) `multichannel=true`
 /// is added as well, so channel 0 is known to be you and diarization only has to split the
 /// remote side.
+///
+/// `keywords` is nova-2's decoding-bias hint — one `word:intensifier` pair per boosted term. `2`
+/// is a modest nudge on purpose: over-boosting trades misses for false positives the other way.
+/// (Moving to nova-3 renames this to `keyterm` and drops the intensifier — update both call
+/// sites here if that ever happens.)
 struct DeepgramTranscriber: Transcriber {
     private static let base = "https://api.deepgram.com/v1/listen"
     private static let common =
         "model=nova-2&punctuate=true&paragraphs=true&smart_format=true&diarize=true&mip_opt_out=true"
 
-    private func endpoint(twoTrack: Bool) -> URL {
-        URL(string: "\(Self.base)?\(Self.common)\(twoTrack ? "&multichannel=true" : "")")!
+    /// `.urlQueryAllowed` alone still passes through `&`, `=`, `+`, `?`, `#` — each a
+    /// delimiter with its own meaning in a query string, so a term containing one has to lose
+    /// it here rather than fold it into the URL's own structure.
+    private static let queryValueAllowed: CharacterSet = {
+        var set = CharacterSet.urlQueryAllowed
+        set.remove(charactersIn: "&=+?#")
+        return set
+    }()
+
+    private func endpoint(twoTrack: Bool, vocabulary: [String]) -> URL {
+        var query = "\(Self.common)\(twoTrack ? "&multichannel=true" : "")"
+        for term in vocabulary {
+            guard let encoded = "\(term):2".addingPercentEncoding(withAllowedCharacters: Self.queryValueAllowed)
+            else { continue }
+            query += "&keywords=\(encoded)"
+        }
+        return URL(string: "\(Self.base)?\(query)")!
     }
 
     private var apiKey: String? { Keychain.key(for: .deepgram) }
 
-    func transcribe(_ audioURL: URL, twoTrack: Bool) async throws -> TranscriptionResult {
+    func transcribe(_ audioURL: URL, twoTrack: Bool, vocabulary: [String]) async throws -> TranscriptionResult {
         guard let key = apiKey else { throw TranscriberError.missingKey }
         guard let audio = try? Data(contentsOf: audioURL) else { throw TranscriberError.decoding }
 
-        var req = URLRequest(url: endpoint(twoTrack: twoTrack))
+        var req = URLRequest(url: endpoint(twoTrack: twoTrack, vocabulary: vocabulary))
         req.httpMethod = "POST"
         req.setValue("Token \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("audio/mp4", forHTTPHeaderField: "Content-Type")

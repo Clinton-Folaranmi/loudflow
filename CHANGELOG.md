@@ -11,6 +11,70 @@ build as `DesignVersion.current` and shown in the sidebar footer.
 
 Nothing pending.
 
+## 1.5.0 — 2026-09-04 — design 5
+
+A week of real use, not a design update — no design v6 exists yet, so this ships as code first;
+see [`design/SYNC.md`](design/SYNC.md) for the push-back that follows.
+
+### Fixed
+
+- **Pointing-hand cursor on every clickable control.** Nav rows, filter chips, clip rows, the
+  scrubber, editor and settings buttons, voice pills, and the widget pill (while a click does
+  something) now show it. Implemented as a cursor rect, not `NSCursor.push()/pop()` — push/pop
+  drifts out of balance the moment a hovered view disappears out from under the mouse, which the
+  morphing widget pill and hover-only Copy pill do constantly.
+- **Receipts chart hover panel no longer draws behind the next bar.** Hover state moved from
+  each bar up to the chart, so the hovered column's `zIndex` can be raised above its neighbours —
+  an `HStack`'s children otherwise paint in source order, which is why the panel disappeared
+  under whatever came after it.
+- **Widget toast moves beside the pill instead of on top of it**, sliding out from behind it on
+  the side the pill grows in, rather than dropping in from above. The toast's "Fix it" action is
+  gone with it — the only thing it did was reopen the last clip, redundant with just clicking it
+  in Library.
+- **Today lists every recording for the day**, not just the first four.
+- **"ON THIS MAC" opens the recordings folder** in Finder.
+- **Audio cues (record start/stop, transcript landed) now reliably play.** They were rendered
+  through one long-lived `AVAudioEngine`, which recording itself can silently disconnect —
+  starting the mic engine, and (with system audio) `SystemAudioTap` building a private aggregate
+  output device, both fire `AVAudioEngineConfigurationChange`. The engine restarted fine after
+  that, so nothing surfaced an error, but its player node was no longer connected to anything.
+  Each tone now plays through its own cached `AVAudioPlayer`, which re-establishes its own output
+  across a device change instead of depending on one shared engine staying wired up.
+
+### Speaker labelling reworked
+
+The reported bug — wrong-person attribution, and "I can't edit my own voice" — traced to
+`applyTranscript` pinning provider-local speaker 0 to `You` on **every** clip, when the mic/system
+track split (which is what actually guarantees that) only exists on a two-track recording. On a
+mono clip (in-person meeting, the system-audio permission declined, nothing playing) whoever
+diarization heard first became "You" — permanently, since `You` couldn't be renamed, reassigned,
+or reconsidered.
+
+- **Mono clips no longer default a speaker to You.** Every local speaker index gets its own
+  voice, exactly as remote speakers already did on a two-track clip, leaving attribution to the
+  user (or a confirmed suggestion) instead of a guess baked in at transcription time.
+- **You can be renamed.** Its name is `AppModel.displayName` — the same one the greeting uses —
+  editable from its own Settings pill or from a transcript's rename menu. It still can't be
+  merged into another voice or forgotten; it's defined by the microphone track, not by a name.
+- **Fixing a speaker from a transcript now touches only that recording.** A new per-clip API
+  (`reassignSpeaker` / `detachSpeaker` / `nameSpeaker`) repoints one clip's turns without
+  renaming the shared voice profile everywhere it appears; the transcript's pen menu now offers
+  named voices, **You** (when the clip doesn't have one), typing a new name, and — once a speaker
+  already carries an identity — "Not this person" to split it back off. Renaming a voice from
+  Settings remains the global path, on purpose: that's the one place a name is meant to apply
+  everywhere.
+- **The recogniser suggests instead of silently repointing.** A confident match now shows as a
+  dismissible "Looks like Ada" chip on the transcript instead of rewriting the turn (and forgetting
+  the stand-in voice) on its own — a wrong guess used to be unrecoverable and could silently
+  rewrite a name across the library. Accepting or dismissing is always the user's call.
+
+### Added
+
+- **Vocabulary bank.** A Settings card for names, jargon, and spellings the transcriber tends to
+  mangle, sent along as a decoding hint — Deepgram's `keywords` parameter, or Whisper's `prompt`
+  field for the OpenAI path. Every named voice is included automatically, so naming someone helps
+  their own transcript without retyping the name.
+
 ## 1.4.0 — 2026-08-22 — design 5
 
 Applies design versions **3**, **4**, and **5** in full. Two kinds of recording, speaker names
