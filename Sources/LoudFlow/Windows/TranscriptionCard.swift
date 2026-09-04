@@ -27,6 +27,7 @@ struct TranscriptionCard: View {
                             .overlay(Capsule().stroke(model.provider == p ? Theme.marigold : Theme.creamLine, lineWidth: 1.5))
                     }
                     .buttonStyle(.plain)
+                    .clickable()
                 }
             }
 
@@ -54,12 +55,14 @@ struct TranscriptionCard: View {
                 .buttonStyle(.plain)
                 .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
                 .opacity(keyInput.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
+                .clickable(if: !keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
 
                 if model.hasKey {
                     Button { model.clearKey() } label: {
                         Text("Remove").font(Typo.font(13, 700)).foregroundColor(Theme.creamMuted)
                     }
                     .buttonStyle(.plain)
+                    .clickable()
                 }
             }
 
@@ -71,6 +74,7 @@ struct TranscriptionCard: View {
                         .font(Typo.font(12.5, 800))
                         .foregroundColor(Theme.marigoldInk)
                         .underline()
+                        .clickable()
                 }
             }
 

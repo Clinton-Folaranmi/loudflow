@@ -29,9 +29,6 @@ enum LibraryFilter: String, CaseIterable {
 struct Toast: Identifiable, Equatable {
     let id = UUID()
     var message: String
-    var action: String = ""
-    var kind: Kind = .plain
-    enum Kind { case plain, fixLast }
 }
 
 /// The single source of truth. Mirrors the spec's state model and adds the real-world bits:
@@ -70,7 +67,20 @@ final class AppModel: ObservableObject {
 
     // MARK: Feedback
     @Published var toast: Toast?
-    @Published var displayName: String { didSet { Preferences.displayName = displayName } }
+    /// Also the name the You voice carries — see `VoiceStore.rename`'s note on why You's name
+    /// is mirrored here rather than settable through the usual per-voice rename flow.
+    @Published var displayName: String {
+        didSet {
+            Preferences.displayName = displayName
+            voices.rename(Voice.youID, to: userFirstName)
+        }
+    }
+
+    // MARK: Vocabulary
+    /// Names, jargon and spellings the transcriber tends to get wrong. See `effectiveVocabulary`
+    /// for what actually goes to the provider — this is only the part the user typed in.
+    @Published var vocabulary: [String] { didSet { Preferences.vocabulary = vocabulary } }
+    private static let vocabularyLimit = 100
 
     // MARK: Voices
     /// Stored voice profiles. Naming a voice renames every turn it ever spoke.
@@ -117,8 +127,14 @@ final class AppModel: ObservableObject {
         self.provider = prov
         self.clips = Persistence.shared.loadClips()
         self.displayName = Preferences.displayName ?? ""
+        self.vocabulary = Preferences.vocabulary
         self.transcriber = TranscriberFactory.make(provider: prov)
         self.selectedId = clips.first?.id
+
+        // The above assignment doesn't run `didSet` (it's displayName's first-ever set), so
+        // seed You's stored name explicitly — covers a fresh voices.json and a macOS account
+        // name that changed since last launch.
+        voices.rename(Voice.youID, to: userFirstName)
 
         refreshKeyStatus()
         wireUp()
@@ -226,12 +242,15 @@ final class AppModel: ObservableObject {
                 }
                 let target = Persistence.shared.newAudioURL()
                 do {
+                    // Before the recorder starts: starting it (and, with system audio, the tap's
+                    // private aggregate device) is exactly what can fire a CoreAudio device
+                    // change, and the tone should already be running rather than racing it.
+                    Earcons.recordStart()
                     try self.recorder.start(to: target.url)
                     self.pendingAudio = target
                     self.widgetState = .recording
                     self.elapsed = 0
                     self.startTick()
-                    Earcons.recordStart()
                 } catch {
                     self.toast = Toast(message: "Couldn't start the mic. Try again.")
                     self.scheduleToastDismiss()
@@ -281,10 +300,11 @@ final class AppModel: ObservableObject {
         guard let clip = clips.first(where: { $0.id == clipID }) else { return }
         let url = Persistence.shared.url(forAudio: clip.audioFileName)
         let twoTrack = clip.twoTrack
+        let vocabulary = effectiveVocabulary
         transcribingIds.insert(clipID)
         Task {
             do {
-                let result = try await transcriber.transcribe(url, twoTrack: twoTrack)
+                let result = try await transcriber.transcribe(url, twoTrack: twoTrack, vocabulary: vocabulary)
                 await MainActor.run { self.finishTranscription(clipID: clipID, result: result, insert: insertOnFinish) }
             } catch let e as TranscriberError {
                 await MainActor.run { self.handleTranscribeFailure(clipID: clipID, error: e, insert: insertOnFinish) }
@@ -301,7 +321,8 @@ final class AppModel: ObservableObject {
         // No post-processing at all. Punctuation, paragraph breaks, and readable numbers are
         // the provider's own output; rewording is what the app refuses, and nothing here does
         // any. What does happen is bookkeeping: the provider's per-recording speaker indices
-        // become stored voice ids, with the mic track pinned to you.
+        // become stored voice ids, with the mic track pinned to you on a two-track clip (see
+        // `applyTranscript`).
         applyTranscript(result, toClipAt: idx)
         clips[idx].status = .done
         persist()
@@ -337,7 +358,7 @@ final class AppModel: ObservableObject {
         flashClipId = clipID
         widgetState = .idle
         let message = (options.insert && didType) ? "Recording pasted." : "Copied."
-        toast = Toast(message: message, action: "Fix it", kind: .fixLast)
+        toast = Toast(message: message)
         scheduleToastDismiss()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in
@@ -415,9 +436,15 @@ final class AppModel: ObservableObject {
     /// Writes a provider result onto a clip, turning the provider's **local** speaker indices
     /// into stored voice ids.
     ///
-    /// Local 0 is the microphone track, so it maps straight to you and never needs guessing.
-    /// Everyone else on the call gets a freshly minted voice; naming one later can merge it
-    /// into a voice you have already met (see `VoiceStore.rename`).
+    /// Local 0 is the microphone track **only when the clip is two-track** — that split is the
+    /// one thing that actually guarantees local 0 is you, so only then does it map straight to
+    /// `Voice.youID` without guessing. On a single-track clip (system audio declined, or
+    /// nothing was playing) local 0 is just whichever voice diarization happened to hear
+    /// first; pinning it to You there used to mislabel that person permanently, since You can't
+    /// be reassigned away from. Every local index gets its own freshly minted voice instead,
+    /// left for the user (or a confirmed recognizer suggestion, see `recogniseVoices`) to
+    /// attribute — including, on a mono clip, to themselves via the transcript's rename menu.
+    /// Naming any of them later can merge it into a voice already met (see `VoiceStore.rename`).
     private func applyTranscript(_ result: TranscriptionResult, toClipAt idx: Int) {
         guard let localTurns = result.turns, !localTurns.isEmpty else {
             clips[idx].turns = nil
@@ -428,10 +455,11 @@ final class AppModel: ObservableObject {
         var order: [Int] = []
         for t in localTurns where !order.contains(t.speaker) { order.append(t.speaker) }
 
-        let remotes = order.filter { $0 != 0 }
-        let minted = voices.mintVoices(count: remotes.count)
-        var map: [Int: Int] = [0: Voice.youID]
-        for (i, local) in remotes.enumerated() { map[local] = minted[i] }
+        let twoTrack = clips[idx].twoTrack
+        let toMint = twoTrack ? order.filter { $0 != 0 } : order
+        let minted = voices.mintVoices(count: toMint.count)
+        var map: [Int: Int] = twoTrack ? [0: Voice.youID] : [:]
+        for (i, local) in toMint.enumerated() { map[local] = minted[i] }
 
         clips[idx].turns = localTurns.map {
             Turn(speaker: map[$0.speaker] ?? Voice.youID, at: $0.at, text: $0.text)
@@ -440,7 +468,12 @@ final class AppModel: ObservableObject {
     }
 
     /// Asks the on-device recogniser whether any of this clip's new voices is someone already
-    /// named, and folds them together when it is confident.
+    /// named, and — if it's confident — offers that as a suggestion rather than acting on it.
+    ///
+    /// A wrong guess used to repoint the turn immediately and forget the minted stand-in,
+    /// which meant one bad match could silently rewrite a name across the library with no way
+    /// back (see the note on `suggestions`). Confirming or dismissing is now always the user's
+    /// call — `acceptSuggestion` / `rejectSuggestion`, surfaced on the turn as a chip.
     ///
     /// Nothing runs — and no model is fetched — until there is at least one named voice with a
     /// fingerprint to compare against. Until you have named someone, there is nobody to
@@ -456,19 +489,24 @@ final class AppModel: ObservableObject {
 
         Task { [weak self] in
             guard let self else { return }
-            // One clip can't have the same person as two different speakers.
+            // One clip can't have the same person as two different speakers, whether they're
+            // already named or already suggested as a match.
             var claimed = Set(clip.speakerIds.compactMap { self.voices.voice($0)?.isNamed == true ? $0 : nil })
+            var found: [Int: Int] = [:]
             for speaker in unknown {
-                guard let current = self.clips.first(where: { $0.id == id }),
+                guard !self.rejectedSuggestions.contains(Self.suggestionKey(id, speaker)),
+                      let current = self.clips.first(where: { $0.id == id }),
                       let embedding = await self.recognizer.embedding(forSpeaker: speaker, in: current),
                       let matched = self.recognizer.match(embedding, against: self.voices.voices),
                       !claimed.contains(matched)
                 else { continue }
                 claimed.insert(matched)
-                self.repointTurns(from: speaker, to: matched)
-                self.voices.forget(speaker)          // the minted stand-in is no longer needed
+                found[speaker] = matched
             }
-            self.pruneVoices()
+            guard !found.isEmpty else { return }
+            var forClip = self.suggestions[id] ?? [:]
+            for (speaker, matched) in found { forClip[speaker] = matched }
+            self.suggestions[id] = forClip
         }
     }
 
@@ -558,11 +596,17 @@ final class AppModel: ObservableObject {
 
     // MARK: - Voices
 
-    /// Names a voice from the transcript it was heard in. Every turn by that voice, in every
-    /// clip, updates at once.
+    /// Names a voice everywhere at once — the **global** profile rename. Called only from
+    /// Settings; a transcript's own rename menu goes through `nameSpeaker` / `reassignSpeaker`
+    /// instead, which fix one recording's attribution without touching any other clip.
     func renameVoice(_ id: Int, to name: String, from clip: Clip?) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, id != Voice.youID else { return }
+        guard !isYouName(trimmed) else {
+            toast = Toast(message: "That's your own name — a different voice can't share it.")
+            scheduleToastDismiss()
+            return
+        }
 
         let resolved = voices.rename(id, to: trimmed)
         if resolved != id {
@@ -571,22 +615,7 @@ final class AppModel: ObservableObject {
         }
 
         if let clip, !clip.audioDeleted {
-            let clipID = clip.id
-            // Keep two seconds of this voice from the recording it was named in, so it can be
-            // played back later to confirm the match.
-            if let at = clips.first(where: { $0.id == clipID })?
-                .turns?.first(where: { $0.speaker == resolved })?.at {
-                voices.captureSample(for: resolved,
-                                     from: Persistence.shared.url(forAudio: clip.audioFileName), at: at)
-            }
-            // And a fingerprint, so the next recording can recognise them without being told.
-            Task { [weak self] in
-                guard let self,
-                      let current = self.clips.first(where: { $0.id == clipID }),
-                      let embedding = await self.recognizer.embedding(forSpeaker: resolved, in: current)
-                else { return }
-                self.voices.setEmbedding(embedding, for: resolved)
-            }
+            captureSampleAndEmbedding(for: resolved, in: clip.id)
         }
 
         toast = Toast(message: "Saved. I'll know that voice next time.")
@@ -597,6 +626,160 @@ final class AppModel: ObservableObject {
         guard id != Voice.youID else { return }
         if playingVoiceId == id { samplePlayer.stop(); playingVoiceId = nil }
         voices.forget(id)
+    }
+
+    // MARK: - Vocabulary
+
+    /// Adds a term (trimmed, deduped case-insensitively against what's already there). Silently
+    /// no-ops on an empty or duplicate term; the field clearing on submit is confirmation enough.
+    func addTerm(_ raw: String) {
+        let term = raw.trimmingCharacters(in: .whitespaces)
+        guard !term.isEmpty, !vocabulary.contains(where: { $0.caseInsensitiveCompare(term) == .orderedSame })
+        else { return }
+        guard vocabulary.count < Self.vocabularyLimit else {
+            toast = Toast(message: "That's \(Self.vocabularyLimit) terms — remove one to add another.")
+            scheduleToastDismiss()
+            return
+        }
+        vocabulary.append(term)
+    }
+
+    func removeTerm(_ term: String) {
+        vocabulary.removeAll { $0 == term }
+    }
+
+    /// What actually goes to the transcriber: the typed-in list plus every named voice's name,
+    /// deduped case-insensitively — naming a voice makes it a transcription hint for free,
+    /// with nothing extra to type in twice.
+    var effectiveVocabulary: [String] {
+        var seen = Set<String>()
+        var out: [String] = []
+        for term in vocabulary + voices.voices.compactMap(\.name) {
+            let key = term.lowercased()
+            guard !key.isEmpty, !seen.contains(key) else { continue }
+            seen.insert(key)
+            out.append(term)
+        }
+        return out
+    }
+
+    /// Whether `name` matches You's current name (case- and space-insensitive). Naming a
+    /// different voice the same as yourself is refused rather than silently allowed — `You`
+    /// is defined by the microphone track, not by whatever it's called, so nothing can merge
+    /// into it, and two voices both reading “You” in a transcript would be worse than the error.
+    private func isYouName(_ name: String) -> Bool {
+        let key = name.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !key.isEmpty else { return false }
+        return (voices.voice(Voice.youID)?.name ?? "").trimmingCharacters(in: .whitespaces).lowercased() == key
+    }
+
+    /// Keeps a two-second sample and computes a fingerprint for `voice` from wherever it speaks
+    /// in `clipID`. Shared by the global rename (`renameVoice`) and the per-clip `nameSpeaker`.
+    private func captureSampleAndEmbedding(for voice: Int, in clipID: UUID) {
+        guard let clip = clips.first(where: { $0.id == clipID }), !clip.audioDeleted else { return }
+        if let at = clip.turns?.first(where: { $0.speaker == voice })?.at {
+            voices.captureSample(for: voice, from: Persistence.shared.url(forAudio: clip.audioFileName), at: at)
+        }
+        Task { [weak self] in
+            guard let self,
+                  let current = self.clips.first(where: { $0.id == clipID }),
+                  let embedding = await self.recognizer.embedding(forSpeaker: voice, in: current)
+            else { return }
+            self.voices.setEmbedding(embedding, for: voice)
+        }
+    }
+
+    // MARK: - Per-clip speaker correction
+    //
+    // Fixing a speaker on a transcript touches only that recording — never another clip, and
+    // never the global voice profile beyond what naming any voice always does. That split (and
+    // why it matters) is explained on `applyTranscript` and `recogniseVoices`.
+
+    /// Re-points one clip's turns for `speaker` onto `voice`. If `voice` already speaks
+    /// elsewhere in the same clip, the two speakers' turns merge — one person can't be two
+    /// speakers in one conversation. Every other clip is untouched.
+    func reassignSpeaker(_ speaker: Int, in clipID: UUID, to voice: Int) {
+        guard speaker != voice,
+              let idx = clips.firstIndex(where: { $0.id == clipID }),
+              var turns = clips[idx].turns, turns.contains(where: { $0.speaker == speaker })
+        else { return }
+        for i in turns.indices where turns[i].speaker == speaker { turns[i].speaker = voice }
+        clips[idx].turns = turns
+        clips[idx].text = clips[idx].flattenedTurns
+        persist()
+        pruneVoices()
+    }
+
+    /// Splits `speaker` off this clip onto a freshly minted voice — “that wasn't them”. Used to
+    /// undo a wrong reassignment (a recogniser suggestion accepted in error, a name that pulled
+    /// in more turns than it should have) without touching any other clip. Returns the new
+    /// voice id, or nil if there was nothing to split.
+    @discardableResult
+    func detachSpeaker(_ speaker: Int, in clipID: UUID) -> Int? {
+        guard let idx = clips.firstIndex(where: { $0.id == clipID }),
+              var turns = clips[idx].turns, turns.contains(where: { $0.speaker == speaker })
+        else { return nil }
+        let fresh = voices.mintVoices(count: 1)[0]
+        for i in turns.indices where turns[i].speaker == speaker { turns[i].speaker = fresh }
+        clips[idx].turns = turns
+        clips[idx].text = clips[idx].flattenedTurns
+        persist()
+        pruneVoices()
+        return fresh
+    }
+
+    /// Names this clip's speaker without dragging every other clip that shares the same voice
+    /// along with it — an attribution fix, not a global rename. If the voice already appears in
+    /// another clip, it's detached onto a fresh one first, so only this recording is renamed.
+    func nameSpeaker(_ speaker: Int, in clipID: UUID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, speaker != Voice.youID else { return }
+        guard !isYouName(trimmed) else {
+            toast = Toast(message: "That's your own name — use “You” instead if this really is you.")
+            scheduleToastDismiss()
+            return
+        }
+
+        let sharedElsewhere = clips.contains { c in
+            c.id != clipID && (c.turns ?? []).contains { $0.speaker == speaker }
+        }
+        let target = sharedElsewhere ? (detachSpeaker(speaker, in: clipID) ?? speaker) : speaker
+
+        let resolved = voices.rename(target, to: trimmed)
+        if resolved != target {
+            reassignSpeaker(target, in: clipID, to: resolved)
+        }
+        captureSampleAndEmbedding(for: resolved, in: clipID)
+
+        toast = Toast(message: "Saved. I'll know that voice next time.")
+        scheduleToastDismiss()
+    }
+
+    // MARK: - Recognizer suggestions
+    //
+    // A suggestion is offered, never applied on its own — see `recogniseVoices`.
+
+    /// Per-clip suggestions not yet acted on: clip id -> local speaker -> the voice it might be.
+    /// In-memory only; a fresh recognition pass runs once per finished transcription anyway.
+    @Published var suggestions: [UUID: [Int: Int]] = [:]
+
+    /// Suggestions dismissed with "not them" this session, so the same guess doesn't keep
+    /// reappearing on a clip once you've said no.
+    private var rejectedSuggestions: Set<String> = []
+
+    private static func suggestionKey(_ clipID: UUID, _ speaker: Int) -> String { "\(clipID):\(speaker)" }
+
+    /// Confirms a suggestion: reassigns the speaker and clears the chip.
+    func acceptSuggestion(for speaker: Int, in clipID: UUID) {
+        guard let voice = suggestions[clipID]?[speaker] else { return }
+        reassignSpeaker(speaker, in: clipID, to: voice)
+        suggestions[clipID]?[speaker] = nil
+    }
+
+    /// Dismisses a suggestion without acting on it.
+    func rejectSuggestion(for speaker: Int, in clipID: UUID) {
+        rejectedSuggestions.insert(Self.suggestionKey(clipID, speaker))
+        suggestions[clipID]?[speaker] = nil
     }
 
     /// Plays a named voice's two-second sample in Settings. Inert on an unnamed voice.
@@ -669,19 +852,13 @@ final class AppModel: ObservableObject {
         Persistence.shared.deleteAudio(fileName: clip.audioFileName)
         clips.remove(at: idx)
         progressByClip[id] = nil
+        suggestions[id] = nil
         editingTranscript = false
         selectedId = filteredClips.first?.id
         persist()
         pruneVoices()
         toast = Toast(message: "Clip and audio deleted.")
         scheduleToastDismiss()
-    }
-
-    func fixLast() {
-        tab = .library
-        selectedId = clips.first?.id
-        toast = nil
-        showMainWindow?()
     }
 
     // MARK: - Onboarding

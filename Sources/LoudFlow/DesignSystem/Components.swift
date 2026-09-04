@@ -99,6 +99,17 @@ extension AnyTransition {
             removal: .opacity
         )
     }
+
+    /// Fade in + translateX, sliding out from behind whatever it's docked against (the widget
+    /// pill) rather than dropping in from above — for content that appears beside a fixed
+    /// anchor instead of above or below it. `fromTrailing` says which side that anchor is on:
+    /// true starts the slide from the trailing (right) side, false from the leading side.
+    static func fSlideIn(fromTrailing: Bool) -> AnyTransition {
+        .asymmetric(
+            insertion: .opacity.combined(with: .offset(x: fromTrailing ? 10 : -10)),
+            removal: .opacity
+        )
+    }
 }
 
 // MARK: - Keycap chip
@@ -259,6 +270,7 @@ struct FilterChip: View {
                 )
         }
         .buttonStyle(.plain)
+        .clickable()
     }
 }
 
@@ -303,11 +315,40 @@ struct Scrubber: View {
             )
         }
         .frame(height: knob + slop * 2)
+        .clickable()
     }
 
     private func seek(_ x: CGFloat, in width: CGFloat) {
         guard width > knob else { return }
         // The knob's travel is inset by its own width, so undo that to get the real position.
         onSeek(Double(max(0, min(1, (x - knob / 2) / (width - knob)))))
+    }
+}
+
+// MARK: - Pointing-hand cursor
+
+/// Pointing-hand cursor over a clickable region, applied as a cursor rect rather than
+/// `NSCursor.push()/pop()` — push/pop unbalances the moment a hovered view disappears out from
+/// under the mouse, which the morphing widget pill and hover-only pills do constantly. A cursor
+/// rect can't drift like that: AppKit re-evaluates it itself.
+private struct ClickCursor: NSViewRepresentable {
+    final class RectView: NSView {
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+        // Never take the click or the hover — this view exists only to own a cursor rect.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+    func makeNSView(context: Context) -> NSView { RectView() }
+    func updateNSView(_ nsView: NSView, context: Context) { nsView.window?.invalidateCursorRects(for: nsView) }
+}
+
+extension View {
+    /// Shows the pointing-hand cursor while hovering this view. Purely visual — it does not
+    /// affect hit testing or add its own tap handling.
+    func clickable() -> some View { overlay(ClickCursor()) }
+
+    /// `clickable()`, but only when `condition` holds — for a view whose tap does nothing in
+    /// some states (a turn block that seeks only while reading, not while editing).
+    @ViewBuilder func clickable(if condition: Bool) -> some View {
+        if condition { clickable() } else { self }
     }
 }

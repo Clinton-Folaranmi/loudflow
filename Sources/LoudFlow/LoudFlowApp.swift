@@ -29,7 +29,24 @@ struct RootView: View {
         }
         .frame(minWidth: 980, minHeight: 680)
         .animation(.easeOut(duration: 0.2), value: model.showingOnboarding)
+        .background(LiveResizeFix())
     }
+}
+
+/// A window's content view redraws its layer from a cached bitmap while you drag-resize it,
+/// stretching the last frame to the new size instead of asking SwiftUI to relayout — real
+/// content only catches up once you let go. That reads as the window ignoring you while you're
+/// actively resizing it. Continuous redraw during the drag has to be opted into explicitly.
+private struct LiveResizeFix: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            view.window?.contentView?.layerContentsRedrawPolicy = .duringViewResize
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 /// App lifecycle: owns the shared model, brings up the floating widget, keeps running when the

@@ -3,6 +3,11 @@ import SwiftUI
 struct ReceiptsView: View {
     @ObservedObject var model: AppModel
 
+    /// Which day's panel is showing, by index rather than `DayWords.id` — `model.weekWords`
+    /// synthesizes a fresh UUID on every access, so an id captured in one render would never
+    /// match the id in the next. The index (0…6, oldest→today) is stable across renders.
+    @State private var hoveredIndex: Int?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
@@ -34,7 +39,8 @@ struct ReceiptsView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Words per day").font(Typo.font(16, 800)).foregroundColor(Theme.ink)
                 // 112pt of headroom so the tallest bar's hover panel never covers the heading.
-                chart.padding(.top, 112)
+                // zIndex above the caption line below, so a short bar's panel clears it too.
+                chart.padding(.top, 112).zIndex(1)
                 Text(model.longestCaption)
                     .font(Typo.font(13, 400)).foregroundColor(Theme.body)
             }
@@ -44,21 +50,34 @@ struct ReceiptsView: View {
     /// The week's bars, each one its own hover target. Hovering turns the bar marigold and
     /// floats the day's detail above it — anchored to the bar, so the panel tracks the day's
     /// height instead of sitting at a fixed line.
+    ///
+    /// Hover state lives here, not on each `DayColumn`, so the hovered column's `zIndex` can be
+    /// raised above its neighbours — an `HStack`'s children otherwise paint in order, which is
+    /// why a panel used to disappear behind the next bar.
     private var chart: some View {
         let week = model.weekWords
         let maxWords = max(1, week.map(\.words).max() ?? 1)
 
         return HStack(alignment: .top, spacing: 16) {
-            ForEach(Array(week.enumerated()), id: \.element.id) { index, day in
+            ForEach(Array(week.enumerated()), id: \.offset) { index, day in
                 DayColumn(
                     day: day,
                     fraction: Double(day.words) / Double(maxWords),
                     chartHeight: 170,
                     peak: day.words == maxWords && day.words > 0,
                     typingWPM: model.typingWPM,
-                    panelEdge: index == 0 ? .leading : (index == week.count - 1 ? .trailing : .center)
+                    panelEdge: index == 0 ? .leading : (index == week.count - 1 ? .trailing : .center),
+                    hovering: hoveredIndex == index,
+                    onHover: { isHovering in
+                        if isHovering {
+                            hoveredIndex = index
+                        } else if hoveredIndex == index {
+                            hoveredIndex = nil
+                        }
+                    }
                 )
                 .frame(maxWidth: .infinity)
+                .zIndex(hoveredIndex == index ? 1 : 0)
             }
         }
     }
@@ -72,10 +91,10 @@ private struct DayColumn: View {
     let peak: Bool
     let typingWPM: Int
     let panelEdge: PanelEdge
+    let hovering: Bool
+    let onHover: (Bool) -> Void
 
     enum PanelEdge { case leading, center, trailing }
-
-    @State private var hovering = false
 
     private var barHeight: CGFloat { max(2, chartHeight * fraction) }
     private var barColor: Color { hovering ? Theme.marigold : (peak ? Theme.sage : Theme.desk) }
@@ -109,7 +128,7 @@ private struct DayColumn: View {
                 .foregroundColor(peak ? Theme.sageDeep : Theme.muted)
         }
         .contentShape(Rectangle())
-        .onHover { hovering = $0 }
+        .onHover(perform: onHover)
     }
 
     private var panel: some View {

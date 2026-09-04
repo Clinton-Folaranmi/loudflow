@@ -221,6 +221,7 @@ private struct EditorPane: View {
                 }
             }
             .buttonStyle(.plain)
+            .clickable()
 
             VStack(spacing: 1) {
                 Scrubber(fraction: fraction) { model.seek(clip, to: $0) }
@@ -382,6 +383,7 @@ private struct EditorPane: View {
                             .background(Capsule().fill(Theme.ink))
                         }
                         .buttonStyle(.plain)
+                        .clickable()
                         .padding(.top, 2)
                     }
                 }
@@ -409,12 +411,14 @@ private struct EditorPane: View {
                              bg: Theme.ink, fg: Theme.cream, weight: 800)
                     }
                     .buttonStyle(.plain)
+                    .clickable()
                 } else {
                     Button(action: saveTapped) {
                         pill(icon: Solar.check, title: justSaved ? "Saved" : "Save changes",
                              bg: Theme.ink, fg: Theme.cream, weight: 800)
                     }
                     .buttonStyle(.plain)
+                    .clickable()
                     .animation(.easeInOut(duration: 0.15), value: justSaved)
                 }
 
@@ -424,6 +428,7 @@ private struct EditorPane: View {
                          bg: Theme.creamChip, fg: Theme.creamBody, weight: 700)
                 }
                 .buttonStyle(.plain)
+                .clickable()
                 .animation(.easeInOut(duration: 0.15), value: justCopied)
             }
 
@@ -471,10 +476,12 @@ private struct EditorPane: View {
                 Button { model.deleteSelected(); confirmingDelete = false } label: {
                     Text("Delete").font(Typo.font(13, 800)).foregroundColor(Theme.danger)
                 }.buttonStyle(.plain)
+                .clickable()
                 Text("·").foregroundColor(Theme.muted)
                 Button { confirmingDelete = false } label: {
                     Text("Cancel").font(Typo.font(13, 700)).foregroundColor(Theme.muted)
                 }.buttonStyle(.plain)
+                .clickable()
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
         } else {
@@ -486,6 +493,7 @@ private struct EditorPane: View {
                 .padding(.horizontal, 12).padding(.vertical, 10)
             }
             .buttonStyle(.plain)
+            .clickable()
         }
     }
 

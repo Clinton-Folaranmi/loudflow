@@ -18,6 +18,7 @@ struct SettingsView: View {
             toggleCard
             retentionCard
             speakersCard              // voice profiles — no toggle, this is how recording works
+            vocabularyCard            // decoding hints sent alongside the audio
             transcriptionCard         // the API key lives here (and in onboarding)
         }
     }
@@ -81,6 +82,7 @@ struct SettingsView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .clickable()
                 .overlay(alignment: .bottom) {
                     if idx < optionRows.count - 1 {
                         Rectangle().fill(Theme.hairline2).frame(height: 1)
@@ -127,7 +129,7 @@ struct SettingsView: View {
                 SolarIcon(name: Solar.speakers, size: 18, color: Theme.marigoldInk)
                 Text("Speakers").font(Typo.font(15, 800)).foregroundColor(Theme.creamInk)
             }
-            Text("When a recording has more than one voice, LoudFlow labels each one. Voices you've named are recognised the next time they turn up.")
+            Text("When a recording has more than one voice, LoudFlow labels each one. A voice you've named that turns up again is offered as a suggestion on the transcript, not applied on its own. Fixing a name from a transcript only changes that recording; renaming a voice here changes every recording it's in.")
                 .font(Typo.font(12.5, 400))
                 .foregroundColor(Theme.creamBody)
                 .lineSpacing(12.5 * 0.45)
@@ -167,9 +169,101 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: Vocabulary
+
+    /// Names, jargon and spellings the transcriber tends to get wrong, sent along as a
+    /// decoding hint (see `Transcriber.transcribe(_:twoTrack:vocabulary:)`). A voice you've
+    /// named is included automatically — see `AppModel.effectiveVocabulary` — so this list is
+    /// only for what naming a voice doesn't already cover.
+    private var vocabularyCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 9) {
+                SolarIcon(name: Solar.textField, size: 18, color: Theme.marigoldInk)
+                Text("Vocabulary").font(Typo.font(15, 800)).foregroundColor(Theme.creamInk)
+            }
+            Text("Add names, jargon, or spellings the transcriber keeps getting wrong. A voice you've named counts too, without retyping it here.")
+                .font(Typo.font(12.5, 400))
+                .foregroundColor(Theme.creamBody)
+                .lineSpacing(12.5 * 0.45)
+                .fixedSize(horizontal: false, vertical: true)
+
+            FlowLayout(spacing: 7) {
+                ForEach(model.vocabulary, id: \.self) { term in
+                    TermPill(term: term) { model.removeTerm(term) }
+                }
+                AddTermField { model.addTerm($0) }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.cardSmall).fill(Theme.cream))
+    }
+
     // MARK: Transcription
 
     private var transcriptionCard: some View { TranscriptionCard(model: model) }
+}
+
+// MARK: - Vocabulary pills
+
+/// One stored term: label + remove, mirroring `VoicePill`'s shape without the play/rename
+/// affordances a plain word doesn't need.
+private struct TermPill: View {
+    let term: String
+    let remove: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(term)
+                .font(Typo.font(13, 700))
+                .foregroundColor(Theme.creamInk)
+                .padding(.horizontal, 2)
+            Button(action: remove) {
+                ZStack {
+                    Circle().fill(hovering ? Theme.marigold : Theme.creamChip)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(Theme.marigoldInk)
+                }
+                .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .clickable()
+            .onHover { hovering = $0 }
+            .help("Remove \(term)")
+        }
+        .padding(5)
+        .background(Capsule().fill(Theme.card))
+        .overlay(Capsule().stroke(Theme.creamLine2, lineWidth: 1.5))
+    }
+}
+
+/// The always-open "type to add" field at the end of the term list. Stays focused after a
+/// submit, so adding several terms in a row is just type-Return-type-Return.
+private struct AddTermField: View {
+    let add: (String) -> Void
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("Add a term", text: $draft)
+            .textFieldStyle(.plain)
+            .font(Typo.font(13, 700))
+            .foregroundColor(Theme.creamInk)
+            .focused($focused)
+            .frame(width: 120)
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Capsule().fill(Theme.card))
+            .overlay(Capsule().stroke(Theme.creamLine, lineWidth: 1.5))
+            .onSubmit {
+                let trimmed = draft.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { return }
+                add(trimmed)
+                draft = ""
+                focused = true
+            }
+    }
 }
 
 // MARK: - Voice pill
@@ -202,19 +296,19 @@ private struct VoicePill: View {
                     .foregroundColor(voice.isNamed ? Theme.creamInk : Theme.creamMuted)
                     .padding(.horizontal, 2)
 
-                // You is never renamed and never forgotten.
-                if !voice.isYou {
-                    penButton
-                    if voice.isNamed {
-                        Button { model.forgetVoice(voice.id) } label: {
-                            Text("Forget")
-                                .font(Typo.font(11.5, 700))
-                                .foregroundColor(Theme.creamMuted)
-                                .padding(.horizontal, 5)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Forget this voice")
+                // You can be renamed (it changes the greeting too — see `AppModel.displayName`)
+                // but never forgotten; every other voice gets both once it's named.
+                penButton
+                if !voice.isYou && voice.isNamed {
+                    Button { model.forgetVoice(voice.id) } label: {
+                        Text("Forget")
+                            .font(Typo.font(11.5, 700))
+                            .foregroundColor(Theme.creamMuted)
+                            .padding(.horizontal, 5)
                     }
+                    .buttonStyle(.plain)
+                    .clickable()
+                    .help("Forget this voice")
                 }
             }
         }
@@ -235,6 +329,7 @@ private struct VoicePill: View {
             .frame(width: 20, height: 20)
         }
         .buttonStyle(.plain)
+        .clickable(if: canPlay)
         .disabled(!canPlay)
         .onHover { playHovering = $0 }
         .help(canPlay ? "Hear \(voice.name ?? "")" : "Name this voice to keep a sample")
@@ -253,6 +348,7 @@ private struct VoicePill: View {
             .frame(width: 20, height: 20)
         }
         .buttonStyle(.plain)
+        .clickable()
         .onHover { penHovering = $0 }
         .help(voice.isNamed ? "Rename this voice" : "Name this voice")
     }
@@ -271,7 +367,14 @@ private struct VoicePill: View {
                 let name = draft.trimmingCharacters(in: .whitespaces)
                 renaming = nil
                 guard !name.isEmpty else { return }        // empty keeps the old name
-                model.renameVoice(voice.id, to: name, from: nil)
+                // You's name is `displayName`, mirrored onto the voice — see the didSet on
+                // `AppModel.displayName` — rather than the per-voice rename path everyone
+                // else uses.
+                if voice.isYou {
+                    model.displayName = name
+                } else {
+                    model.renameVoice(voice.id, to: name, from: nil)
+                }
             }
             .onExitCommand { renaming = nil }
             .onAppear { focused = true }
@@ -359,6 +462,7 @@ private struct TriggerCard: View {
             )
         }
         .buttonStyle(.plain)
+        .clickable()
     }
 }
 
@@ -378,5 +482,6 @@ private struct RetentionPill: View {
                 .overlay(Capsule().stroke(selected ? Theme.marigold : Theme.creamLine, lineWidth: 1.5))
         }
         .buttonStyle(.plain)
+        .clickable()
     }
 }
