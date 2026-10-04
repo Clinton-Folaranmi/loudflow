@@ -9,7 +9,27 @@ build as `DesignVersion.current` and shown in the sidebar footer.
 
 ## Unreleased
 
-Nothing pending.
+### Fixed
+
+- **Conversation turns seek reliably from the text itself.** The transcript body previously
+  enabled macOS text selection, which consumed its click before the turn's seek gesture could
+  receive it. Clicking any read-only turn now jumps to its timestamp and starts playback; edit
+  mode still gives the text field the click and caret.
+- **Speaker correction is no longer hidden behind hover.** The speaker pen remains visually
+  quiet when a turn is not hovered, but is always available to click. Transcript corrections
+  remain local to that recording; Settings is still the deliberate global-profile surface.
+- **The recording pill changes state as one motion.** Its state, padding, background and
+  contents now use a shared damped spring rather than separately finishing ease-in-out
+  animations, removing the visible shape/label mismatch while recording stops and
+  transcription begins.
+
+### Added
+
+- **Library-wide transcript search.** Search filters the current library view by transcript
+  content and named speakers, with an explicit empty state and clear control.
+- **Playback speed control.** The editor transport now offers 0.75×, 1×, 1.25×, 1.5×, and 2×.
+  The selected speed applies immediately, carries into the next clip, and is remembered across
+  launches.
 
 ## 1.5.0 — 2026-09-04 — design 5
 
