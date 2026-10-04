@@ -17,7 +17,11 @@ struct LibraryView: View {
             .padding(.horizontal, 4)
             .padding(.top, 4)
 
-            filterChips
+            HStack(alignment: .center, spacing: 12) {
+                filterChips
+                Spacer(minLength: 12)
+                librarySearch
+            }
 
             // Both columns fill the window height and scroll inside themselves, so opening a
             // long transcript never scrolls the clip list away.
@@ -43,12 +47,33 @@ struct LibraryView: View {
         .padding(.horizontal, 4)
     }
 
+    private var librarySearch: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").font(.system(size: 14, weight: .semibold)).foregroundColor(Theme.muted)
+            TextField("Search transcripts", text: $model.librarySearch)
+                .textFieldStyle(.plain)
+                .font(Typo.font(13, 600))
+                .foregroundColor(Theme.ink)
+            if !model.librarySearch.isEmpty {
+                Button { model.librarySearch = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundColor(Theme.muted)
+                }
+                .buttonStyle(.plain)
+                .clickable()
+            }
+        }
+        .padding(.horizontal, 11).padding(.vertical, 9)
+        .frame(width: 230)
+        .background(Capsule().fill(Theme.card))
+        .overlay(Capsule().stroke(Theme.hairline, lineWidth: 1))
+    }
+
     private var listCard: some View {
         Card(padding: 14, fillHeight: true) {
             ScrollView(.vertical) {
                 VStack(spacing: 7) {
                     if model.filteredClips.isEmpty {
-                        Text("No recordings yet.")
+                        Text(model.librarySearch.isEmpty ? "No recordings yet." : "No matching recordings.")
                             .font(Typo.font(14, 400))
                             .foregroundColor(Theme.placeholder)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -233,7 +258,34 @@ private struct EditorPane: View {
                 .font(Typo.font(11.5, 700))
                 .foregroundColor(Theme.creamMuted)
             }
+
+            Menu {
+                ForEach([Float(0.75), 1, 1.25, 1.5, 2], id: \.self) { rate in
+                    Button { model.playbackRate = rate } label: {
+                        if rate == model.playbackRate {
+                            Label(rateLabel(rate), systemImage: "checkmark")
+                        } else {
+                            Text(rateLabel(rate))
+                        }
+                    }
+                }
+            } label: {
+                Text(rateLabel(model.playbackRate))
+                    .font(Typo.font(12, 800))
+                    .foregroundColor(Theme.creamBody)
+                    .frame(minWidth: 40)
+                    .padding(.horizontal, 8).padding(.vertical, 7)
+                    .background(Capsule().fill(Theme.creamChip))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .clickable()
+            .help("Playback speed")
         }
+    }
+
+    private func rateLabel(_ rate: Float) -> String {
+        rate == 1 ? "1×" : "\(rate.formatted())×"
     }
 
     private var retentionStrip: some View {

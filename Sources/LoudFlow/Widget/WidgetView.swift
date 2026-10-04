@@ -90,8 +90,11 @@ struct WidgetView: View {
         .onHover(perform: setHovering)
         .onTapGesture(perform: tapped)
         .clickable(if: tapDoesSomething)
-        .animation(.easeInOut(duration: 0.22), value: paddingKey)
-        .animation(.easeInOut(duration: 0.22), value: pillBackground)
+        // One spring owns the pill's geometry and contents. Independent property animations
+        // made its label, padding and dot appear to finish at different times.
+        .animation(.spring(response: 0.30, dampingFraction: 0.88), value: state)
+        .animation(.spring(response: 0.30, dampingFraction: 0.88), value: paddingKey)
+        .animation(.spring(response: 0.30, dampingFraction: 0.88), value: pillBackground)
     }
 
     /// Whether `tapped()` currently does anything — the pill is inert while transcribing or

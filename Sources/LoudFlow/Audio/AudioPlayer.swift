@@ -13,6 +13,7 @@ final class AudioPlayer: NSObject {
 
     private var player: AVAudioPlayer?
     private var timer: Timer?
+    private var rate: Float = 1
 
     var isPlaying: Bool { player?.isPlaying ?? false }
     var duration: TimeInterval { player?.duration ?? 0 }
@@ -22,6 +23,8 @@ final class AudioPlayer: NSObject {
         stop()
         guard let p = try? AVAudioPlayer(contentsOf: url) else { onFinish?(); return }
         p.delegate = self
+        p.enableRate = true
+        p.rate = rate
         player = p
         // A clip played to the end starts over rather than refusing to move.
         let start = fraction >= 0.999 ? 0 : max(0, min(1, fraction))
@@ -48,6 +51,12 @@ final class AudioPlayer: NSObject {
         guard let p = player, p.duration > 0 else { return }
         p.currentTime = max(0, min(1, fraction)) * p.duration
         onProgress?(max(0, min(1, fraction)))
+    }
+
+    func setRate(_ rate: Float) {
+        self.rate = rate
+        player?.enableRate = true
+        player?.rate = rate
     }
 
     func stop() {
