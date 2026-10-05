@@ -184,7 +184,8 @@ struct TurnBlockView: View {
                 .lineSpacing(14 * 0.55)
                 .foregroundColor(Theme.creamInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
+                // A read-only transcript block is a seek target. Text selection consumed
+                // clicks over the body, leaving only the header reliably tappable.
         }
     }
 }
@@ -238,8 +239,9 @@ private struct PenButton: View {
             }
         }
         .onHover { hovering = $0 }
-        .opacity(visible ? 1 : 0)
-        .allowsHitTesting(visible)
+        // Speaker attribution is consequential. Keep correction discoverable at rest rather
+        // than hiding the only control behind an imprecise hover target.
+        .opacity(visible ? 1 : 0.55)
         .animation(.easeInOut(duration: 0.12), value: visible)
         .help(hasMenu ? "Name this voice, or pick one you know" : "Name this voice")
     }

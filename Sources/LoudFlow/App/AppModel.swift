@@ -59,6 +59,8 @@ final class AppModel: ObservableObject {
     /// the position and the scrubber still shows it when nothing is playing.
     @Published var progressByClip: [UUID: Double] = [:]
     @Published var libraryFilter: LibraryFilter = .all
+    @Published var librarySearch = ""
+    @Published var playbackRate: Float { didSet { Preferences.playbackRate = playbackRate; player.setRate(playbackRate) } }
     /// Conversations are read by default; this is the `Edit transcript` / `Done editing` state.
     @Published var editingTranscript = false
     @Published var hoveredId: UUID?
@@ -128,6 +130,7 @@ final class AppModel: ObservableObject {
         self.clips = Persistence.shared.loadClips()
         self.displayName = Preferences.displayName ?? ""
         self.vocabulary = Preferences.vocabulary
+        self.playbackRate = Preferences.playbackRate
         self.transcriber = TranscriberFactory.make(provider: prov)
         self.selectedId = clips.first?.id
 
@@ -796,7 +799,15 @@ final class AppModel: ObservableObject {
     var todayClips: [Clip] { clips.filter { $0.isToday } }
 
     /// The Library list under the current filter chip.
-    var filteredClips: [Clip] { clips.filter { libraryFilter.matches($0) } }
+    var filteredClips: [Clip] {
+        let query = librarySearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return clips.filter { clip in
+            guard libraryFilter.matches(clip) else { return false }
+            guard !query.isEmpty else { return true }
+            let speakers = clip.speakerIds.compactMap { voices.voice($0)?.name }.joined(separator: " ")
+            return (clip.text + " " + speakers).localizedCaseInsensitiveContains(query)
+        }
+    }
 
     /// Switching filters keeps the selected clip when it survives the change, otherwise takes
     /// the first one, and always leaves edit mode.

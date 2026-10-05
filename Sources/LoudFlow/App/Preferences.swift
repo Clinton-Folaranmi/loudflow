@@ -15,6 +15,7 @@ enum Preferences {
         static let wordsToday = "wordsToday"
         static let wordsTodayDay = "wordsTodayDay"   // yyyy-ddd to reset the counter daily
         static let vocabulary = "vocabulary"
+        static let playbackRate = "playbackRate"
     }
 
     static var trigger: TriggerMode {
@@ -88,6 +89,15 @@ enum Preferences {
     static var vocabulary: [String] {
         get { d.stringArray(forKey: Key.vocabulary) ?? [] }
         set { d.set(newValue, forKey: Key.vocabulary) }
+    }
+
+    static var playbackRate: Float {
+        get {
+            let value = Float(d.double(forKey: Key.playbackRate))
+            guard value > 0 else { return 1 }
+            return [0.75, 1, 1.25, 1.5, 2].contains(value) ? value : 1
+        }
+        set { d.set(newValue, forKey: Key.playbackRate) }
     }
 
     /// The floating widget's saved bottom-left origin (screen coords), or nil to use the
