@@ -23,14 +23,15 @@ struct TurnBlockView: View {
     @State private var hovering = false
     @State private var draft = ""
     @FocusState private var nameFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var voice: Voice? { model.voices.voice(turn.speaker) }
     private var ink: Color { voice?.ink ?? Theme.creamInk }
     private var label: String { clip.speakerLabel(turn.speaker, voices: model.voices.voices) }
     private var isRenaming: Bool { renamingVoice == turn.speaker }
 
-    /// Hover and playback share one fill — no stroke, no second treatment.
-    private var fill: Color { (active || hovering) ? Theme.creamChip : .clear }
+    /// Playback stays distinct from a temporary pointer hover.
+    private var fill: Color { active ? Theme.creamChip : (hovering ? Theme.creamLine2 : .clear) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -41,6 +42,7 @@ struct TurnBlockView: View {
                     accept: { model.acceptSuggestion(for: turn.speaker, in: clip.id) },
                     reject: { model.rejectSuggestion(for: turn.speaker, in: clip.id) }
                 )
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }
             body_text
         }
@@ -54,6 +56,20 @@ struct TurnBlockView: View {
             guard !editing else { return }
             model.playTurn(clip, at: turn.at)
         }
+        .focusable(!editing)
+        .onKeyPress(.return) {
+            guard !editing else { return .ignored }
+            model.playTurn(clip, at: turn.at)
+            return .handled
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(label), \(Clip.formatSeconds(Int(turn.at))), \(turn.text)")
+        .accessibilityHint(editing ? "Editing transcript" : "Play from this turn")
+        .accessibilityAction {
+            if !editing { model.playTurn(clip, at: turn.at) }
+        }
+        .animation(reduceMotion ? nil : Motion.feedback, value: active)
+        .animation(reduceMotion ? nil : Motion.hover, value: hovering)
         .clickable(if: !editing)
     }
 
@@ -209,6 +225,7 @@ private struct PenButton: View {
     let onTypeAName: () -> Void
 
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var hasMenu: Bool { !candidates.isEmpty || showsYou || canDetach }
 
@@ -242,7 +259,7 @@ private struct PenButton: View {
         // Speaker attribution is consequential. Keep correction discoverable at rest rather
         // than hiding the only control behind an imprecise hover target.
         .opacity(visible ? 1 : 0.55)
-        .animation(.easeInOut(duration: 0.12), value: visible)
+        .animation(reduceMotion ? nil : Motion.hover, value: visible)
         .help(hasMenu ? "Name this voice, or pick one you know" : "Name this voice")
     }
 
@@ -262,6 +279,7 @@ private struct SuggestionChip: View {
     let name: String
     let accept: () -> Void
     let reject: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 7) {
@@ -269,17 +287,19 @@ private struct SuggestionChip: View {
                 .font(Typo.font(11.5, 700))
                 .foregroundColor(Theme.marigoldInk)
 
-            Button(action: accept) {
+            Button { withAnimation(reduceMotion ? nil : Motion.feedback) { accept() } } label: {
                 SolarIcon(name: Solar.check, size: 13, color: Theme.marigoldInk)
+                    .frame(width: 26, height: 26)
             }
             .buttonStyle(.plain)
             .clickable()
             .help("Yes, that's \(name)")
 
-            Button(action: reject) {
+            Button { withAnimation(reduceMotion ? nil : Motion.feedback) { reject() } } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundColor(Theme.marigoldInk)
+                    .frame(width: 26, height: 26)
             }
             .buttonStyle(.plain)
             .clickable()

@@ -7,7 +7,30 @@ two stay in step.
 Each release names the **design version** it implements. That number is also compiled into the
 build as `DesignVersion.current` and shown in the sidebar footer.
 
-## Unreleased
+## 1.6.1 — 2026-10-09 — design 5
+
+### Interaction refinement
+
+- Removed the Library's persistent selected-row fill and native blue focus effect.
+- Tightened letter spacing for selected bold clip titles to reduce their width shift.
+- Removed the slide and fade transition from the transcript panel when selecting a clip.
+
+## 1.6.0 — 2026-10-08 — design 5
+
+### Interaction polish
+
+- The sidebar selection travels between tabs and page content settles into place; Library
+  filters, clip selection, Settings options, onboarding steps, and local action feedback share
+  a restrained motion vocabulary.
+- The floating widget follows the pointer in screen coordinates while dragged, updates snap
+  guides only when needed, and defers competing resize animations until the drag ends.
+- Edited transcripts commit to their own clip when selection or tab changes. Library search
+  keeps the transcript pane aligned with the visible result list.
+- Clip rows and transcript turns can be activated from the keyboard, the scrubber supports
+  arrow-key and accessibility adjustments, and chart details and transcription privacy copy
+  are available by click or focus as well as hover.
+- Reduce Motion stops repeating decorative animation and replaces large transitions with
+  immediate state changes.
 
 ### Fixed
 

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LibraryView: View {
     @ObservedObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var contentFrame: CGRect = .zero
     @State private var viewportHeight: CGFloat = 0
@@ -40,7 +41,7 @@ struct LibraryView: View {
         HStack(spacing: 8) {
             ForEach(LibraryFilter.allCases, id: \.self) { filter in
                 FilterChip(title: filter.label, active: model.libraryFilter == filter) {
-                    model.setFilter(filter)
+                    withAnimation(reduceMotion ? nil : Motion.page) { model.setFilter(filter) }
                 }
             }
         }
@@ -50,28 +51,42 @@ struct LibraryView: View {
     private var librarySearch: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").font(.system(size: 14, weight: .semibold)).foregroundColor(Theme.muted)
-            TextField("Search transcripts", text: $model.librarySearch)
-                .textFieldStyle(.plain)
-                .font(Typo.font(13, 600))
-                .foregroundColor(Theme.ink)
+            ZStack(alignment: .leading) {
+                if model.librarySearch.isEmpty {
+                    Text("Search transcripts")
+                        .font(Typo.font(13, 600))
+                        .foregroundColor(Theme.muted)
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: Binding(
+                    get: { model.librarySearch },
+                    set: { model.setLibrarySearch($0) }
+                ))
+                    .textFieldStyle(.plain)
+                    .font(Typo.font(13, 600))
+                    .foregroundColor(Theme.ink)
+                    .accessibilityLabel("Search transcripts")
+            }
             if !model.librarySearch.isEmpty {
-                Button { model.librarySearch = "" } label: {
+                Button { model.setLibrarySearch("") } label: {
                     Image(systemName: "xmark.circle.fill").foregroundColor(Theme.muted)
                 }
                 .buttonStyle(.plain)
                 .clickable()
+                .transition(.opacity)
             }
         }
         .padding(.horizontal, 11).padding(.vertical, 9)
         .frame(width: 230)
         .background(Capsule().fill(Theme.card))
         .overlay(Capsule().stroke(Theme.hairline, lineWidth: 1))
+        .animation(reduceMotion ? nil : Motion.feedback, value: model.librarySearch.isEmpty)
     }
 
     private var listCard: some View {
         Card(padding: 14, fillHeight: true) {
             ScrollView(.vertical) {
-                VStack(spacing: 7) {
+                LazyVStack(spacing: 7) {
                     if model.filteredClips.isEmpty {
                         Text(model.librarySearch.isEmpty ? "No recordings yet." : "No matching recordings.")
                             .font(Typo.font(14, 400))
@@ -107,8 +122,8 @@ struct LibraryView: View {
             .overlay(alignment: .bottom) {
                 edgeFade(height: 22, top: false).opacity(fadeBottom ? 1 : 0)
             }
-            .animation(.easeInOut(duration: 0.15), value: fadeTop)
-            .animation(.easeInOut(duration: 0.15), value: fadeBottom)
+            .animation(reduceMotion ? nil : Motion.feedback, value: fadeTop)
+            .animation(reduceMotion ? nil : Motion.feedback, value: fadeBottom)
         }
     }
 
@@ -132,7 +147,8 @@ struct LibraryView: View {
             // otherwise the previous clip's edited text would persist in the field.
             // Key on transcription-state too, so the field remounts (and picks up the text)
             // when a retry fills in a previously-empty transcript.
-            EditorPane(model: model, clip: clip).id("\(clip.id)-\(clip.needsTranscription)")
+            EditorPane(model: model, clip: clip)
+                .id("\(clip.id)-\(clip.needsTranscription)")
         } else {
             VStack {
                 Text("Select a clip to see its transcript.")
@@ -166,18 +182,22 @@ private struct EditorPane: View {
     /// A note's sentences and a conversation's turns are both edited as a list of strings, so
     /// one buffer covers both.
     @State private var blocks: [String]
+    @State private var savedBlocks: [String]
     @State private var flashBg: Color = Theme.card
     @State private var confirmingDelete = false
     @State private var renamingVoice: Int?
     @State private var justCopied = false
     @State private var justSaved = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: AppModel, clip: Clip) {
         self.model = model
         self.clip = clip
-        _blocks = State(initialValue: clip.isConversation
-                        ? (clip.turns ?? []).map(\.text)
-                        : clip.sentences)
+        let initialBlocks = clip.isConversation
+            ? (clip.turns ?? []).map(\.text)
+            : clip.sentences
+        _blocks = State(initialValue: initialBlocks)
+        _savedBlocks = State(initialValue: initialBlocks)
     }
 
     private var isPlaying: Bool { model.playingId == clip.id }
@@ -188,6 +208,7 @@ private struct EditorPane: View {
     private var wordCount: Int {
         blocks.joined(separator: " ").split(whereSeparator: { $0 == " " || $0 == "\n" }).count
     }
+    private var isDirty: Bool { blocks != savedBlocks }
     private var isTranscribing: Bool { model.transcribingIds.contains(clip.id) }
 
     /// A conversation is read by default; a note is always editable in place.
@@ -223,6 +244,10 @@ private struct EditorPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Theme.cream))
         .onAppear(perform: maybeFlash)
+        .onChange(of: model.editingTranscript) { editing in
+            if !editing && clip.isConversation { commitDraft() }
+        }
+        .onDisappear(perform: commitDraft)
     }
 
     // MARK: Metadata + transport
@@ -245,7 +270,7 @@ private struct EditorPane: View {
                     SolarIcon(name: isPlaying ? Solar.pause : Solar.play, size: 19, color: Theme.creamInk)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressFeedbackStyle())
             .clickable()
 
             VStack(spacing: 1) {
@@ -327,7 +352,8 @@ private struct EditorPane: View {
                 .onChange(of: activeIndex) { index in
                     // Follow playback, but never while the caret is in a field.
                     guard let index, !model.editingTranscript else { return }
-                    withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(index, anchor: .center) }
+                    if reduceMotion { proxy.scrollTo(index, anchor: .center) }
+                    else { withAnimation(Motion.page) { proxy.scrollTo(index, anchor: .center) } }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -462,16 +488,18 @@ private struct EditorPane: View {
                              title: model.editingTranscript ? "Done editing" : "Edit transcript",
                              bg: Theme.ink, fg: Theme.cream, weight: 800)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressFeedbackStyle())
                     .clickable()
                 } else {
                     Button(action: saveTapped) {
                         pill(icon: Solar.check, title: justSaved ? "Saved" : "Save changes",
                              bg: Theme.ink, fg: Theme.cream, weight: 800)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressFeedbackStyle())
                     .clickable()
-                    .animation(.easeInOut(duration: 0.15), value: justSaved)
+                    .animation(reduceMotion ? nil : Motion.feedback, value: justSaved)
+                    .disabled(!isDirty)
+                    .opacity(isDirty || justSaved ? 1 : 0.6)
                 }
 
                 Button(action: copyTapped) {
@@ -479,9 +507,9 @@ private struct EditorPane: View {
                          title: justCopied ? "Copied" : "Copy",
                          bg: Theme.creamChip, fg: Theme.creamBody, weight: 700)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressFeedbackStyle())
                 .clickable()
-                .animation(.easeInOut(duration: 0.15), value: justCopied)
+                .animation(reduceMotion ? nil : Motion.feedback, value: justCopied)
             }
 
             Spacer()
@@ -503,7 +531,7 @@ private struct EditorPane: View {
     }
 
     private func saveTapped() {
-        model.saveEdit(blocks.joined(separator: " "))
+        commitDraft()
         justSaved = true
         Task {
             try? await Task.sleep(nanoseconds: 1_600_000_000)
@@ -513,12 +541,24 @@ private struct EditorPane: View {
 
     private func toggleConversationEditing() {
         if model.editingTranscript {
-            model.saveTurns(blocks)
+            commitDraft()
             model.editingTranscript = false
         } else {
             renamingVoice = nil
             model.editingTranscript = true
         }
+    }
+
+    /// The pane is keyed by clip ID, so it disappears on selection changes. Commit to that
+    /// captured ID rather than the model's new selected ID; this also protects tab changes.
+    private func commitDraft() {
+        guard isDirty else { return }
+        if clip.isConversation {
+            model.saveTurns(blocks, for: clip.id)
+        } else {
+            model.saveEdit(blocks.joined(separator: " "), for: clip.id)
+        }
+        savedBlocks = blocks
     }
 
     // Delete asks first (irreversible: removes audio + transcript, no undo).
@@ -527,25 +567,28 @@ private struct EditorPane: View {
             HStack(spacing: 6) {
                 Button { model.deleteSelected(); confirmingDelete = false } label: {
                     Text("Delete").font(Typo.font(13, 800)).foregroundColor(Theme.danger)
-                }.buttonStyle(.plain)
+                }.buttonStyle(PressFeedbackStyle())
                 .clickable()
                 Text("·").foregroundColor(Theme.muted)
-                Button { confirmingDelete = false } label: {
+                Button { withAnimation(reduceMotion ? nil : Motion.feedback) { confirmingDelete = false } } label: {
                     Text("Cancel").font(Typo.font(13, 700)).foregroundColor(Theme.muted)
-                }.buttonStyle(.plain)
+                }.buttonStyle(PressFeedbackStyle())
                 .clickable()
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
+            .onExitCommand { confirmingDelete = false }
+            .transition(.opacity)
         } else {
-            Button { confirmingDelete = true } label: {
+            Button { withAnimation(reduceMotion ? nil : Motion.feedback) { confirmingDelete = true } } label: {
                 HStack(spacing: 7) {
                     SolarIcon(name: Solar.trash, size: 15, color: Theme.danger)
                     Text("Delete clip").font(Typo.font(13, 700)).foregroundColor(Theme.danger)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressFeedbackStyle())
             .clickable()
+            .transition(.opacity)
         }
     }
 

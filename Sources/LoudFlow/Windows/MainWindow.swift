@@ -5,13 +5,20 @@ import SwiftUI
 /// Onboarding overlays this (see `RootView`).
 struct MainWindow: View {
     @ObservedObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(alignment: .top, spacing: 22) {
             Sidebar(model: model)
                 .frame(width: 212)
 
-            pane
+            ZStack(alignment: .topLeading) {
+                pane
+                    .id(model.tab)
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6)))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .animation(reduceMotion ? nil : Motion.page, value: model.tab)
         }
         // Small top inset — just enough to clear the floating traffic lights. The window
         // ignores the (hidden) title-bar safe area so this isn't doubled up.

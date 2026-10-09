@@ -16,6 +16,7 @@ struct WaveBars: View {
     var minScale: CGFloat = 0.16
 
     @State private var animating = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: gap) {
@@ -24,9 +25,9 @@ struct WaveBars: View {
                     .fill(color)
                     .frame(maxWidth: .infinity)
                     .frame(height: height)
-                    .scaleEffect(x: 1, y: animating ? 1 : minScale, anchor: .center)
+                    .scaleEffect(x: 1, y: reduceMotion ? 0.6 : (animating ? 1 : minScale), anchor: .center)
                     .animation(
-                        .easeInOut(duration: duration)
+                        reduceMotion ? nil : .easeInOut(duration: duration)
                             .repeatForever(autoreverses: true)
                             .delay(Double(i) * stagger),
                         value: animating
@@ -47,6 +48,7 @@ struct LiveWaveBars: View {
     var gap: CGFloat = 3
     var color: Color = Theme.sage
     var minScale: CGFloat = 0.12
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: gap) {
@@ -56,7 +58,7 @@ struct LiveWaveBars: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: height)
                     .scaleEffect(x: 1, y: barScale(i), anchor: .center)
-                    .animation(.easeOut(duration: 0.09), value: level)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.09), value: level)
             }
         }
         .frame(height: height)
@@ -76,11 +78,12 @@ struct LiveWaveBars: View {
 private struct Pulsing: ViewModifier {
     let duration: Double
     @State private var on = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func body(content: Content) -> some View {
         content
-            .scaleEffect(on ? 1.18 : 1.0)
-            .opacity(on ? 1.0 : 0.8)
-            .animation(.easeInOut(duration: duration).repeatForever(autoreverses: true), value: on)
+            .scaleEffect(reduceMotion ? 1 : (on ? 1.18 : 1.0))
+            .opacity(reduceMotion ? 1 : (on ? 1.0 : 0.8))
+            .animation(reduceMotion ? nil : .easeInOut(duration: duration).repeatForever(autoreverses: true), value: on)
             .onAppear { on = true }
     }
 }
@@ -140,6 +143,7 @@ struct Keycap: View {
 /// 42×24 toggle: track sage (on) / #DDE4DA (off), 18px white knob sliding left 3 ↔ 21px in 0.16s.
 struct LFToggle: View {
     let isOn: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: Theme.Radius.pill)
@@ -152,7 +156,7 @@ struct LFToggle: View {
                 .offset(x: isOn ? 21 : 3)
         }
         .frame(width: 42, height: 24)
-        .animation(.easeInOut(duration: 0.16), value: isOn)
+        .animation(reduceMotion ? nil : Motion.feedback, value: isOn)
     }
 }
 
@@ -174,10 +178,11 @@ struct WeekChart: View {
     var chartHeight: CGFloat
     var gap: CGFloat
     var topRadius: CGFloat = Theme.Radius.bar
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(alignment: .top, spacing: gap) {
-            ForEach(bars) { b in
+            ForEach(Array(bars.enumerated()), id: \.offset) { _, b in
                 VStack(spacing: 8) {
                     ZStack(alignment: .bottom) {
                         Color.clear.frame(maxWidth: .infinity).frame(height: chartHeight)
@@ -195,6 +200,7 @@ struct WeekChart: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .animation(reduceMotion ? nil : Motion.page, value: bars.map(\.fraction))
     }
 }
 
@@ -229,6 +235,7 @@ struct SpinRing: View {
     var lit: Color = Theme.sage
 
     @State private var spinning = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -240,9 +247,9 @@ struct SpinRing: View {
                 .rotationEffect(.degrees(-90))
         }
         .frame(width: size, height: size)
-        .rotationEffect(.degrees(spinning ? 360 : 0))
-        .animation(.linear(duration: 0.7).repeatForever(autoreverses: false), value: spinning)
-        .onAppear { spinning = true }
+        .rotationEffect(.degrees(spinning && !reduceMotion ? 360 : 0))
+        .animation(reduceMotion ? nil : .linear(duration: 0.7).repeatForever(autoreverses: false), value: spinning)
+        .onAppear { spinning = !reduceMotion }
     }
 }
 
@@ -254,6 +261,8 @@ struct FilterChip: View {
     let title: String
     let active: Bool
     let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -263,14 +272,18 @@ struct FilterChip: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
                 .background(
-                    Capsule().fill(active ? Theme.marigold : .clear)
+                    Capsule().fill(active ? Theme.marigold : (hovering ? Theme.sagePale2 : .clear))
                 )
                 .overlay(
                     Capsule().stroke(active ? .clear : Theme.chipLine, lineWidth: 1.5)
                 )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressFeedbackStyle())
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : Motion.feedback, value: active)
+        .animation(reduceMotion ? nil : Motion.hover, value: hovering)
         .clickable()
+        .accessibilityValue(active ? "Selected" : "")
     }
 }
 
@@ -286,6 +299,9 @@ struct Scrubber: View {
     var track: Color = Theme.creamLine
     var fill: Color = Theme.sage
     var onSeek: (Double) -> Void
+    @State private var hovering = false
+    @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let trackHeight: CGFloat = 8
     private let knob: CGFloat = 16
@@ -303,6 +319,8 @@ struct Scrubber: View {
                     .fill(Theme.marigold)
                     .overlay(Circle().stroke(Theme.cream, lineWidth: 2))
                     .frame(width: knob, height: knob)
+                    .scaleEffect(hovering || focused ? 1.15 : 1)
+                    .shadow(color: Theme.marigold.opacity(hovering || focused ? 0.25 : 0), radius: 4)
                     // Kept inside the track's ends so the knob never overhangs the card.
                     .offset(x: clamped * (width - knob))
             }
@@ -315,6 +333,28 @@ struct Scrubber: View {
             )
         }
         .frame(height: knob + slop * 2)
+        .onHover { hovering = $0 }
+        .focusable()
+        .focused($focused)
+        .onKeyPress(.leftArrow) {
+            onSeek(max(0, fraction - 0.02))
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            onSeek(min(1, fraction + 0.02))
+            return .handled
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Playback position")
+        .accessibilityValue("\(Int(fraction * 100)) percent")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: onSeek(min(1, fraction + 0.02))
+            case .decrement: onSeek(max(0, fraction - 0.02))
+            @unknown default: break
+            }
+        }
+        .animation(reduceMotion ? nil : Motion.hover, value: hovering || focused)
         .clickable()
     }
 

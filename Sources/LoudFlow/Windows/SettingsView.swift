@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -149,6 +150,8 @@ struct SettingsView: View {
                     VoicePill(model: model, voice: voice, renaming: $renamingVoice)
                 }
             }
+            .animation(reduceMotion ? nil : Motion.page,
+                       value: model.voices.listed.map(\.settingsLabel))
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -193,6 +196,7 @@ struct SettingsView: View {
                 }
                 AddTermField { model.addTerm($0) }
             }
+            .animation(reduceMotion ? nil : Motion.page, value: model.vocabulary)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -227,8 +231,9 @@ private struct TermPill: View {
                         .foregroundColor(Theme.marigoldInk)
                 }
                 .frame(width: 18, height: 18)
+                .frame(width: 28, height: 28)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressFeedbackStyle())
             .clickable()
             .onHover { hovering = $0 }
             .help("Remove \(term)")
@@ -245,6 +250,7 @@ private struct AddTermField: View {
     let add: (String) -> Void
     @State private var draft = ""
     @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         TextField("Add a term", text: $draft)
@@ -255,7 +261,8 @@ private struct AddTermField: View {
             .frame(width: 120)
             .padding(.horizontal, 12).padding(.vertical, 8)
             .background(Capsule().fill(Theme.card))
-            .overlay(Capsule().stroke(Theme.creamLine, lineWidth: 1.5))
+            .overlay(Capsule().stroke(focused ? Theme.marigold : Theme.creamLine, lineWidth: 1.5))
+            .animation(reduceMotion ? nil : Motion.feedback, value: focused)
             .onSubmit {
                 let trimmed = draft.trimmingCharacters(in: .whitespaces)
                 guard !trimmed.isEmpty else { return }
@@ -277,7 +284,9 @@ private struct VoicePill: View {
     @State private var draft = ""
     @State private var penHovering = false
     @State private var playHovering = false
+    @State private var confirmingForget = false
     @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isRenaming: Bool { renaming == voice.id }
     private var isPlaying: Bool { model.playingVoiceId == voice.id }
@@ -300,21 +309,35 @@ private struct VoicePill: View {
                 // but never forgotten; every other voice gets both once it's named.
                 penButton
                 if !voice.isYou && voice.isNamed {
-                    Button { model.forgetVoice(voice.id) } label: {
-                        Text("Forget")
-                            .font(Typo.font(11.5, 700))
-                            .foregroundColor(Theme.creamMuted)
-                            .padding(.horizontal, 5)
+                    if confirmingForget {
+                        Button { model.forgetVoice(voice.id); confirmingForget = false } label: {
+                            Text("Forget?")
+                                .font(Typo.font(11.5, 800))
+                                .foregroundColor(Theme.danger)
+                        }
+                        .buttonStyle(PressFeedbackStyle())
+                        Button { withAnimation(reduceMotion ? nil : Motion.feedback) { confirmingForget = false } } label: {
+                            Text("Cancel").font(Typo.font(11.5, 700)).foregroundColor(Theme.creamMuted)
+                        }
+                        .buttonStyle(PressFeedbackStyle())
+                    } else {
+                        Button { withAnimation(reduceMotion ? nil : Motion.feedback) { confirmingForget = true } } label: {
+                            Text("Forget")
+                                .font(Typo.font(11.5, 700))
+                                .foregroundColor(Theme.creamMuted)
+                                .padding(.horizontal, 5)
+                        }
+                        .buttonStyle(PressFeedbackStyle())
+                        .clickable()
+                        .help("Forget this voice")
                     }
-                    .buttonStyle(.plain)
-                    .clickable()
-                    .help("Forget this voice")
                 }
             }
         }
         .padding(5)
         .background(Capsule().fill(Theme.card))
         .overlay(Capsule().stroke(isRenaming ? Theme.marigold : Theme.creamLine2, lineWidth: 1.5))
+        .onExitCommand { confirmingForget = false }
     }
 
     /// Plays the voice's stored two seconds, so you can confirm the match.
@@ -327,11 +350,13 @@ private struct VoicePill: View {
                           color: isPlaying ? Theme.creamInk : Theme.sageDeep)
             }
             .frame(width: 20, height: 20)
+            .frame(width: 28, height: 28)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressFeedbackStyle())
         .clickable(if: canPlay)
         .disabled(!canPlay)
         .onHover { playHovering = $0 }
+        .animation(reduceMotion ? nil : Motion.hover, value: playHovering)
         .help(canPlay ? "Hear \(voice.name ?? "")" : "Name this voice to keep a sample")
     }
 
@@ -346,10 +371,12 @@ private struct VoicePill: View {
                 SolarIcon(name: Solar.pen, size: 10, color: Theme.marigoldInk)
             }
             .frame(width: 20, height: 20)
+            .frame(width: 28, height: 28)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressFeedbackStyle())
         .clickable()
         .onHover { penHovering = $0 }
+        .animation(reduceMotion ? nil : Motion.hover, value: penHovering)
         .help(voice.isNamed ? "Rename this voice" : "Name this voice")
     }
 
@@ -443,6 +470,8 @@ private struct TriggerCard: View {
     let mode: TriggerMode
     let selected: Bool
     let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -455,14 +484,19 @@ private struct TriggerCard: View {
             }
             .padding(EdgeInsets(top: 16, leading: 17, bottom: 16, trailing: 17))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.block).fill(Theme.card))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.block)
+                .fill(hovering && !selected ? Theme.sagePale2 : Theme.card))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.block)
                     .stroke(selected ? Theme.marigold : Theme.hairline, lineWidth: 2)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressFeedbackStyle())
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : Motion.feedback, value: selected)
+        .animation(reduceMotion ? nil : Motion.hover, value: hovering)
         .clickable()
+        .accessibilityValue(selected ? "Selected" : "")
     }
 }
 
@@ -472,16 +506,22 @@ private struct RetentionPill: View {
     let label: String
     let selected: Bool
     let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         Button(action: action) {
             Text(label)
                 .font(Typo.font(13, 700))
                 .foregroundColor(selected ? Theme.creamInk : Theme.creamBody)
                 .padding(.horizontal, 16).padding(.vertical, 9)
-                .background(Capsule().fill(selected ? Theme.marigold : Color.clear))
+                .background(Capsule().fill(selected ? Theme.marigold : (hovering ? Theme.creamChip : .clear)))
                 .overlay(Capsule().stroke(selected ? Theme.marigold : Theme.creamLine, lineWidth: 1.5))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressFeedbackStyle())
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : Motion.feedback, value: selected)
+        .animation(reduceMotion ? nil : Motion.hover, value: hovering)
         .clickable()
+        .accessibilityValue(selected ? "Selected" : "")
     }
 }

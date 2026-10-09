@@ -45,6 +45,8 @@ final class WidgetPanelController {
     private var anchor: NSPoint?          // fixed corner (bottom-right if anchorRight, else bottom-left)
     private var anchorRight = true
     private var dragStartOrigin: NSPoint?
+    private var dragStartCursor: NSPoint?
+    private var remeasureAfterDrag = false
     private var repositionScheduled = false
 
     /// The design's snap inset is 26pt from the screen edge, measured to the *visible* pill.
@@ -138,6 +140,10 @@ final class WidgetPanelController {
     /// note on `init`). By the next turn the new state has settled, so `fittingSize` reports the
     /// real destination rather than a frame of the in-flight SwiftUI animation.
     private func remeasure() {
+        if dragStartOrigin != nil {
+            remeasureAfterDrag = true
+            return
+        }
         guard !repositionScheduled else { return }
         repositionScheduled = true
         DispatchQueue.main.async { [weak self] in
@@ -166,14 +172,14 @@ final class WidgetPanelController {
     /// Animated resizes run on the same duration and curve as the pill's own morph, so the window
     /// grows and shrinks in step with the content instead of jumping ahead of or behind it.
     private func applyFrame(size: CGSize, animated: Bool) {
-        guard let a = anchor, let vf = NSScreen.main?.visibleFrame else { return }
+        guard let a = anchor, let vf = (panel.screen ?? NSScreen.main)?.visibleFrame else { return }
         var originX = anchorRight ? a.x - size.width : a.x
         var originY = a.y
         originX = min(max(originX, vf.minX), vf.maxX - size.width)
         originY = min(max(originY, vf.minY), vf.maxY - size.height)
         anchor = NSPoint(x: anchorRight ? originX + size.width : originX, y: originY)
         let frame = NSRect(origin: NSPoint(x: originX, y: originY), size: size)
-        if animated {
+        if animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = morphDuration
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -193,26 +199,50 @@ final class WidgetPanelController {
 
     private func screenMidX() -> CGFloat { (NSScreen.main?.visibleFrame).map { $0.midX } ?? 0 }
 
+    private func dragScreen(for cursor: NSPoint) -> NSScreen? {
+        NSScreen.screens.first(where: { $0.frame.contains(cursor) }) ?? panel.screen ?? NSScreen.main
+    }
+
+    private var combinedVisibleFrame: NSRect {
+        NSScreen.screens.map(\.visibleFrame).reduce(.null) { $0.union($1) }
+    }
+
     // MARK: Dragging + snapping
 
     private func dragChanged(_ t: CGSize) {
-        if dragStartOrigin == nil { dragStartOrigin = panel.frame.origin }
-        guard let start = dragStartOrigin, let vf = NSScreen.main?.visibleFrame else { return }
+        let cursor = NSEvent.mouseLocation
+        let firstUpdate = dragStartOrigin == nil
+        if firstUpdate {
+            dragStartOrigin = panel.frame.origin
+            // The gesture's first callback arrives after its 6pt threshold. Recover where
+            // the pointer started so the pill follows those first pixels too.
+            dragStartCursor = NSPoint(x: cursor.x - t.width, y: cursor.y + t.height)
+        }
+        guard let start = dragStartOrigin, let pointerStart = dragStartCursor,
+              let screen = dragScreen(for: cursor) else { return }
+        let vf = screen.visibleFrame
         let size = panel.frame.size
-        var x = start.x + t.width
-        var y = start.y - t.height          // SwiftUI +y down → screen +y up
-        x = min(max(x, vf.minX), vf.maxX - size.width)
-        y = min(max(y, vf.minY), vf.maxY - size.height)
+        // Translation in the moving window's local space feeds its own movement back into
+        // the gesture and makes the panel jump. Screen coordinates stay fixed during drag.
+        var x = start.x + cursor.x - pointerStart.x
+        var y = start.y + cursor.y - pointerStart.y
+        let travel = combinedVisibleFrame
+        x = min(max(x, travel.minX), travel.maxX - size.width)
+        y = min(max(y, travel.minY), travel.maxY - size.height)
         panel.setFrameOrigin(NSPoint(x: x, y: y))
-        snapGuide.show(target: nearestEdge(of: panel.frame, in: vf))
+        let target = nearestEdge(of: panel.frame, in: vf)
+        if firstUpdate { snapGuide.show(target: target, in: vf) }
+        else { snapGuide.update(target: target, in: vf) }
     }
 
     private func dragEnded() {
         dragStartOrigin = nil
+        dragStartCursor = nil
         snapGuide.hide()
-        guard let vf = NSScreen.main?.visibleFrame else { return }
+        guard let vf = dragScreen(for: NSEvent.mouseLocation)?.visibleFrame else { return }
         let frame = panel.frame
         let edge = nearestEdge(of: frame, in: vf)
+        let previousAnchorRight = anchorRight
 
         // The cross axis is clamped to the same inset, so a widget dropped in a corner ends up
         // neatly inset rather than jammed against two edges at once.
@@ -228,17 +258,28 @@ final class WidgetPanelController {
             let x = clampX(frame, in: vf)
             anchor = NSPoint(x: anchorRight ? x + frame.width : x, y: vf.minY + edgeMargin)
         }
-        bindRootView()                          // flip layout to expand inward
+        if previousAnchorRight != anchorRight {
+            bindRootView()                      // flip layout only when the dock side changes
+        }
 
         guard let a = anchor else { return }
         Preferences.widgetOrigin = CGPoint(x: a.x, y: a.y)
 
         // Animate the slide home. Origin only — the size is already correct.
         let target = NSPoint(x: anchorRight ? a.x - frame.width : a.x, y: a.y)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.22
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().setFrameOrigin(target)
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            panel.setFrameOrigin(target)
+        } else {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.22
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().setFrameOrigin(target)
+            }
+        }
+        remeasureAfterDrag = false
+        let settleDelay = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.22
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay) { [weak self] in
+            self?.remeasure()
         }
     }
 

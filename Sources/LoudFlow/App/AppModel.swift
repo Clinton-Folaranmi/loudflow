@@ -814,9 +814,19 @@ final class AppModel: ObservableObject {
     func setFilter(_ filter: LibraryFilter) {
         guard filter != libraryFilter else { return }
         libraryFilter = filter
-        editingTranscript = false
         let list = filteredClips
         if let id = selectedId, list.contains(where: { $0.id == id }) { return }
+        editingTranscript = false
+        selectedId = list.first?.id
+    }
+
+    /// Keep the editor's selection inside the visible search results. Clearing a search
+    /// restores the first available clip when the previous selection was filtered out.
+    func setLibrarySearch(_ query: String) {
+        librarySearch = query
+        let list = filteredClips
+        if let id = selectedId, list.contains(where: { $0.id == id }) { return }
+        editingTranscript = false
         selectedId = list.first?.id
     }
 
@@ -836,8 +846,8 @@ final class AppModel: ObservableObject {
 
     /// Confirmation is the Save changes button's own state, not a toast — see
     /// `EditorPane.saveTapped`.
-    func saveEdit(_ text: String) {
-        guard let idx = clips.firstIndex(where: { $0.id == selectedId }) else { return }
+    func saveEdit(_ text: String, for clipID: UUID) {
+        guard let idx = clips.firstIndex(where: { $0.id == clipID }) else { return }
         clips[idx].text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         persist()
     }
@@ -845,8 +855,8 @@ final class AppModel: ObservableObject {
     /// Commits edited conversation turns. Speaker and timestamp are untouched — they belong to
     /// the audio — so only the text of each turn comes back. Confirmation is the Done editing
     /// button's own label change, not a toast.
-    func saveTurns(_ texts: [String]) {
-        guard let idx = clips.firstIndex(where: { $0.id == selectedId }),
+    func saveTurns(_ texts: [String], for clipID: UUID) {
+        guard let idx = clips.firstIndex(where: { $0.id == clipID }),
               var turns = clips[idx].turns else { return }
         for i in turns.indices where i < texts.count {
             turns[i].text = texts[i].trimmingCharacters(in: .whitespacesAndNewlines)

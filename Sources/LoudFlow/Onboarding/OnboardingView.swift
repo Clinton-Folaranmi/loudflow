@@ -6,6 +6,8 @@ import SwiftUI
 struct OnboardingView: View {
     @ObservedObject var model: AppModel
     @State private var keyInput: String = ""
+    @State private var direction: CGFloat = 1
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var step: Int { model.onboardingStep }
     private var isLast: Bool { step == AppModel.onboardingLastStep }
@@ -46,6 +48,7 @@ struct OnboardingView: View {
                     }
                 }
                 .padding(EdgeInsets(top: 18, leading: 22, bottom: 0, trailing: 22))
+                .animation(reduceMotion ? nil : Motion.page, value: step)
 
                 // Kicker / title / body
                 VStack(alignment: .leading, spacing: 8) {
@@ -60,13 +63,20 @@ struct OnboardingView: View {
 
                 // Step content. Each step's own section reserves the 192pt, and centres its
                 // content inside it, so the card height never changes between steps.
-                stepContent
+                ZStack {
+                    stepContent
+                        .id(step)
+                        .transition(reduceMotion ? .opacity : .asymmetric(
+                            insertion: .opacity.combined(with: .offset(x: direction * 12)),
+                            removal: .opacity.combined(with: .offset(x: direction * -12))
+                        ))
+                }
                     .frame(maxWidth: .infinity, minHeight: 192, alignment: .center)
                     .padding(EdgeInsets(top: 18, leading: 26, bottom: 0, trailing: 26))
 
                 // Footer
                 HStack(spacing: 10) {
-                    Button { model.onboardingBack() } label: {
+                    Button { direction = -1; model.onboardingBack() } label: {
                         Text(step == 0 ? "Skip all this" : "Back")
                             .font(Typo.font(13.5, 700)).foregroundColor(Theme.muted)
                     }.buttonStyle(.plain)
@@ -90,12 +100,13 @@ struct OnboardingView: View {
             .frame(width: 540)
             .background(RoundedRectangle(cornerRadius: Theme.Radius.onboarding).fill(Theme.card))
             .themeShadow(Theme.Shadow.onboarding)
-            .transition(.fRise)
+            .transition(reduceMotion ? .opacity : .fRise)
         }
-        .animation(.easeOut(duration: 0.2), value: step)
+        .animation(reduceMotion ? nil : Motion.page, value: step)
     }
 
     private func advance() {
+        direction = 1
         if step == 2, !keyInput.trimmingCharacters(in: .whitespaces).isEmpty {
             model.saveKey(keyInput)
             keyInput = ""
@@ -138,10 +149,11 @@ struct OnboardingView: View {
                     .overlay(RoundedRectangle(cornerRadius: 16)
                         .stroke(model.trigger == t ? Theme.marigold : Theme.hairline, lineWidth: 2))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressFeedbackStyle())
                 .clickable()
             }
         }
+        .animation(reduceMotion ? nil : Motion.feedback, value: model.trigger)
     }
 
     private var keyStep: some View {
@@ -155,7 +167,7 @@ struct OnboardingView: View {
                             .padding(.horizontal, 14).padding(.vertical, 8)
                             .background(Capsule().fill(model.provider == p ? Theme.marigoldPale : Theme.sagePale2))
                             .overlay(Capsule().stroke(model.provider == p ? Theme.marigold : .clear, lineWidth: 1.5))
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(PressFeedbackStyle())
                     .clickable()
                 }
                 Spacer()
@@ -163,6 +175,7 @@ struct OnboardingView: View {
                     Text("Key saved").font(Typo.font(12.5, 700)).foregroundColor(Theme.sageDeep)
                 }
             }
+            .animation(reduceMotion ? nil : Motion.feedback, value: model.provider)
             SecureField(model.hasKey ? "•••••••••• (saved — paste to replace)" : "Paste your \(model.provider.displayName) API key", text: $keyInput)
                 .textFieldStyle(.plain)
                 .font(Typo.font(15, 400))
@@ -190,10 +203,11 @@ struct OnboardingView: View {
                     .overlay(RoundedRectangle(cornerRadius: 16)
                         .stroke(model.retention == r ? Theme.marigold : Theme.hairline, lineWidth: 2))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(PressFeedbackStyle())
                 .clickable()
             }
         }
+        .animation(reduceMotion ? nil : Motion.feedback, value: model.retention)
     }
 }
 

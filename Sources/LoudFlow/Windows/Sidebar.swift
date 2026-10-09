@@ -3,6 +3,8 @@ import AppKit
 
 struct Sidebar: View {
     @ObservedObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var navSelection
 
     private struct NavSpec { let tab: Tab; let label: String; let icon: String }
     private let navItems: [NavSpec] = [
@@ -31,7 +33,7 @@ struct Sidebar: View {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(navItems, id: \.tab) { item in
                     NavRow(model: model, tab: item.tab, label: item.label, icon: item.icon,
-                           count: count(for: item.tab))
+                           count: count(for: item.tab), selection: navSelection)
                 }
             }
 
@@ -51,6 +53,7 @@ struct Sidebar: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.cardSmall).fill(Theme.card))
         .themeShadow(Theme.Shadow.card)
+        .animation(reduceMotion ? nil : Motion.selection, value: model.tab)
     }
 
     /// `LoudFlow 1.4.0 (10) · design 4` — the design version rides along with the build
@@ -76,31 +79,44 @@ private struct NavRow: View {
     let label: String
     let icon: String
     let count: String
+    let selection: Namespace.ID
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var active: Bool { model.tab == tab }
 
     var body: some View {
-        HStack(spacing: 10) {
-            SolarIcon(name: icon, size: 18, color: active ? Theme.sageDeep : Theme.body)
-            Text(label)
-                .font(Typo.font(13.5, active ? 700 : 400))
-                .foregroundColor(active ? Theme.sageDeep : Theme.body)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(count)
-                .font(Typo.font(11, 600))
-                .foregroundColor(active ? Theme.sage : Theme.countInactive)
+        Button {
+            model.tab = tab
+        } label: {
+            HStack(spacing: 10) {
+                SolarIcon(name: icon, size: 18, color: active ? Theme.sageDeep : Theme.body)
+                Text(label)
+                    .font(Typo.font(13.5, active ? 700 : 400))
+                    .foregroundColor(active ? Theme.sageDeep : Theme.body)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(count)
+                    .font(Typo.font(11, 600))
+                    .foregroundColor(active ? Theme.sage : Theme.countInactive)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background {
+                if active {
+                    RoundedRectangle(cornerRadius: 11)
+                        .fill(Theme.sagePale)
+                        .matchedGeometryEffect(id: "navSelection", in: selection)
+                } else if hovering {
+                    RoundedRectangle(cornerRadius: 11).fill(Theme.sagePale2)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 11))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(
-            RoundedRectangle(cornerRadius: 11)
-                .fill(active ? Theme.sagePale : (hovering ? Theme.sagePale2 : .clear))
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 11))
+        .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .onTapGesture { model.tab = tab }
+        .animation(reduceMotion ? nil : Motion.hover, value: hovering)
         .clickable()
+        .accessibilityValue(active ? "Selected" : "")
     }
 }
 
@@ -138,4 +154,3 @@ private struct StorageButton: View {
         .help("Show the recordings folder in Finder")
     }
 }
-

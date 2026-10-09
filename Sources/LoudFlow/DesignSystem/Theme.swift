@@ -12,7 +12,6 @@ enum Theme {
     static let card          = Color(hex: 0xFDFBF6) // primary card surfaces, sidebar, widget
     static let row           = Color(hex: 0xF7F9F5) // clip row background inside cards
     static let rowHover      = Color(hex: 0xEDF2E9) // clip row hover
-    static let rowSelected   = Color(hex: 0xF1F5EF) // selected clip row in Library
 
     // MARK: Sage family (the app, and "on")
     static let sagePale      = Color(hex: 0xEAF0E7) // active nav pill, play rest, progress track

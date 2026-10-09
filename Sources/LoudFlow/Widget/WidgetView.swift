@@ -22,11 +22,13 @@ struct WidgetView: View {
     private let shadowPad: CGFloat = 14   // transparent margin so the shadow never clips
 
     @State private var moved = false
+    @State private var dragging = false
     @State private var hovering = false
     /// Cancels a pending hover-off so a boundary flicker (mouse sitting right at the pill's
     /// edge while it grows/shrinks under it) doesn't read as a rapid expand/collapse "shake" —
     /// see `setHovering`.
     @State private var hoverOffTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         // Anchored right: the pill stays put on the right and the toast unfurls to its left.
@@ -40,19 +42,19 @@ struct WidgetView: View {
         HStack(alignment: .center, spacing: 8) {
             if anchorRight {
                 if let toast = model.toast {
-                    toastView(toast).transition(.fSlideIn(fromTrailing: anchorRight))
+                    toastView(toast).transition(reduceMotion ? .opacity : .fSlideIn(fromTrailing: anchorRight))
                 }
                 pill.simultaneousGesture(dragGesture)
             } else {
                 pill.simultaneousGesture(dragGesture)
                 if let toast = model.toast {
-                    toastView(toast).transition(.fSlideIn(fromTrailing: anchorRight))
+                    toastView(toast).transition(reduceMotion ? .opacity : .fSlideIn(fromTrailing: anchorRight))
                 }
             }
         }
         .padding(shadowPad)
         .fixedSize()
-        .animation(.easeOut(duration: 0.16), value: model.toast)
+        .animation(reduceMotion ? nil : Motion.feedback, value: model.toast)
         // Everything that can change how big the pill is. A `GeometryReader` background used to
         // report the live size here, but that only works while `NSHostingView` is the window's
         // own contentView — nested one level down (required to avoid the resize crash below),
@@ -68,8 +70,15 @@ struct WidgetView: View {
     // Drag moves the widget; buttons/taps still fire because the drag needs >6pt of movement.
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 6)
-            .onChanged { g in moved = true; onDragChanged?(g.translation) }
-            .onEnded { _ in if moved { moved = false; onDragEnded?() } }
+            .onChanged { g in
+                if !dragging { dragging = true; hoverOffTask?.cancel() }
+                moved = true
+                onDragChanged?(g.translation)
+            }
+            .onEnded { _ in
+                dragging = false
+                if moved { moved = false; onDragEnded?() }
+            }
     }
 
     // MARK: - The one pill
@@ -89,12 +98,16 @@ struct WidgetView: View {
         .contentShape(Capsule())
         .onHover(perform: setHovering)
         .onTapGesture(perform: tapped)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { if tapDoesSomething { tapped() } }
         .clickable(if: tapDoesSomething)
         // One spring owns the pill's geometry and contents. Independent property animations
         // made its label, padding and dot appear to finish at different times.
-        .animation(.spring(response: 0.30, dampingFraction: 0.88), value: state)
-        .animation(.spring(response: 0.30, dampingFraction: 0.88), value: paddingKey)
-        .animation(.spring(response: 0.30, dampingFraction: 0.88), value: pillBackground)
+        .animation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.88), value: state)
+        .animation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.88), value: paddingKey)
+        .animation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.88), value: pillBackground)
     }
 
     /// Whether `tapped()` currently does anything — the pill is inert while transcribing or
@@ -112,6 +125,7 @@ struct WidgetView: View {
     /// on and off ("shaking"). Entering is instant; leaving waits a beat so a boundary flicker
     /// can cancel it before it's ever seen.
     private func setHovering(_ isHovering: Bool) {
+        guard !dragging else { return }
         hoverOffTask?.cancel()
         if isHovering {
             hovering = true
@@ -169,9 +183,9 @@ struct WidgetView: View {
             SolarIcon(name: dotIcon, size: dotIconSize, color: dotInk)
         }
         .frame(width: dotSize, height: dotSize)
-        .modifier(DotPulse(duration: pulseDuration))
-        .animation(.easeInOut(duration: 0.22), value: dotSize)
-        .animation(.easeInOut(duration: 0.22), value: dotFill)
+        .modifier(DotPulse(duration: reduceMotion ? nil : pulseDuration))
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: dotSize)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: dotFill)
     }
 
     private var cancelButton: some View {
@@ -182,6 +196,7 @@ struct WidgetView: View {
                     .foregroundColor(Theme.inkMutedOnDark)
             }
             .frame(width: 22, height: 22)
+            .frame(width: 30, height: 30)
         }
         .buttonStyle(.plain)
         .clickable()

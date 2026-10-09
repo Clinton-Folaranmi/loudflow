@@ -6,7 +6,12 @@ import SwiftUI
 struct TranscriptionCard: View {
     @ObservedObject var model: AppModel
     @State private var keyInput: String = ""
-    @State private var showingInfo = false
+    @State private var infoHovered = false
+    @State private var infoPinned = false
+    @FocusState private var infoFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var showingInfo: Bool { infoHovered || infoPinned || infoFocused }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -26,10 +31,12 @@ struct TranscriptionCard: View {
                             .background(Capsule().fill(model.provider == p ? Theme.marigold : .clear))
                             .overlay(Capsule().stroke(model.provider == p ? Theme.marigold : Theme.creamLine, lineWidth: 1.5))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressFeedbackStyle())
                     .clickable()
+                    .accessibilityValue(model.provider == p ? "Selected" : "")
                 }
             }
+            .animation(reduceMotion ? nil : Motion.feedback, value: model.provider)
 
             // Key field + save
             HStack(spacing: 8) {
@@ -77,6 +84,7 @@ struct TranscriptionCard: View {
                         .clickable()
                 }
             }
+            .animation(reduceMotion ? nil : Motion.feedback, value: model.keyStatus)
 
             audioDestination
         }
@@ -88,13 +96,20 @@ struct TranscriptionCard: View {
     /// The standing privacy paragraph, folded into an affordance so it doesn't shout on every
     /// visit — but the sentence itself is unchanged and still names the cloud round trip.
     private var audioDestination: some View {
-        HStack(spacing: 6) {
-            SolarIcon(name: Solar.info, size: 15, color: Theme.creamMuted)
-            Text("Where your audio goes")
-                .font(Typo.font(12.5, 700))
-                .foregroundColor(Theme.creamMuted)
+        Button { infoPinned.toggle() } label: {
+            HStack(spacing: 6) {
+                SolarIcon(name: Solar.info, size: 15, color: Theme.creamMuted)
+                Text("Where your audio goes")
+                    .font(Typo.font(12.5, 700))
+                    .foregroundColor(Theme.creamMuted)
+            }
         }
-        .onHover { showingInfo = $0 }
+        .buttonStyle(.plain)
+        .focused($infoFocused)
+        .onHover { infoHovered = $0 }
+        .onExitCommand { infoPinned = false; infoFocused = false }
+        .clickable()
+        .accessibilityHint("Shows how audio is handled by the transcription provider")
         .overlay(alignment: .bottomLeading) {
             if showingInfo {
                 Text("Audio goes to \(model.provider.displayName) to be transcribed with a zero-retention request, then nothing is kept there. The key lives in your Mac's Keychain.")
@@ -107,8 +122,11 @@ struct TranscriptionCard: View {
                     .background(RoundedRectangle(cornerRadius: Theme.Radius.editor).fill(Theme.ink))
                     .shadow(color: Color(hex: 0x141C14, alpha: 0.28), radius: 18, x: 0, y: 6)
                     .offset(y: -26)
+                    .allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .offset(y: 4)))
             }
         }
+        .animation(reduceMotion ? nil : Motion.feedback, value: showingInfo)
     }
 
     private var needsKey: Bool {

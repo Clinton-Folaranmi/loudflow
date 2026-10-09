@@ -7,6 +7,9 @@ struct ReceiptsView: View {
     /// synthesizes a fresh UUID on every access, so an id captured in one render would never
     /// match the id in the next. The index (0…6, oldest→today) is stable across renders.
     @State private var hoveredIndex: Int?
+    @State private var focusedIndex: Int?
+    @State private var pinnedIndex: Int?
+    private var visibleIndex: Int? { hoveredIndex ?? focusedIndex ?? pinnedIndex }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -67,17 +70,19 @@ struct ReceiptsView: View {
                     peak: day.words == maxWords && day.words > 0,
                     typingWPM: model.typingWPM,
                     panelEdge: index == 0 ? .leading : (index == week.count - 1 ? .trailing : .center),
-                    hovering: hoveredIndex == index,
+                    showing: visibleIndex == index,
                     onHover: { isHovering in
                         if isHovering {
                             hoveredIndex = index
                         } else if hoveredIndex == index {
                             hoveredIndex = nil
                         }
-                    }
+                    },
+                    onFocus: { isFocused in focusedIndex = isFocused ? index : nil },
+                    onToggle: { pinnedIndex = pinnedIndex == index ? nil : index }
                 )
                 .frame(maxWidth: .infinity)
-                .zIndex(hoveredIndex == index ? 1 : 0)
+                .zIndex(visibleIndex == index ? 1 : 0)
             }
         }
     }
@@ -91,13 +96,17 @@ private struct DayColumn: View {
     let peak: Bool
     let typingWPM: Int
     let panelEdge: PanelEdge
-    let hovering: Bool
+    let showing: Bool
     let onHover: (Bool) -> Void
+    let onFocus: (Bool) -> Void
+    let onToggle: () -> Void
+    @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum PanelEdge { case leading, center, trailing }
 
     private var barHeight: CGFloat { max(2, chartHeight * fraction) }
-    private var barColor: Color { hovering ? Theme.marigold : (peak ? Theme.sage : Theme.desk) }
+    private var barColor: Color { showing ? Theme.marigold : (peak ? Theme.sage : Theme.desk) }
 
     private var alignment: Alignment {
         switch panelEdge {
@@ -108,27 +117,36 @@ private struct DayColumn: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            ZStack(alignment: .bottom) {
-                Color.clear.frame(maxWidth: .infinity).frame(height: chartHeight)
-                UnevenRoundedRectangle(topLeadingRadius: Theme.Radius.bar,
-                                       topTrailingRadius: Theme.Radius.bar)
-                    .fill(barColor)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: barHeight)
-                    .animation(.easeInOut(duration: 0.12), value: hovering)
-            }
-            .overlay(alignment: alignment) {
-                if hovering {
-                    panel.offset(y: -(barHeight + 8))
+        Button(action: onToggle) {
+            VStack(spacing: 8) {
+                ZStack(alignment: .bottom) {
+                    Color.clear.frame(maxWidth: .infinity).frame(height: chartHeight)
+                    UnevenRoundedRectangle(topLeadingRadius: Theme.Radius.bar,
+                                           topTrailingRadius: Theme.Radius.bar)
+                        .fill(barColor)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: barHeight)
+                        .animation(reduceMotion ? nil : Motion.hover, value: showing)
                 }
+                .overlay(alignment: alignment) {
+                    if showing {
+                        panel.offset(y: -(barHeight + 8))
+                            .transition(.opacity.combined(with: .offset(y: 4)))
+                    }
+                }
+                Text(day.label)
+                    .font(Typo.font(12, peak ? 800 : 700))
+                    .foregroundColor(peak ? Theme.sageDeep : Theme.muted)
             }
-            Text(day.label)
-                .font(Typo.font(12, peak ? 800 : 700))
-                .foregroundColor(peak ? Theme.sageDeep : Theme.muted)
+            .contentShape(Rectangle())
         }
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .focused($focused)
         .onHover(perform: onHover)
+        .onChange(of: focused) { onFocus($0) }
+        .animation(reduceMotion ? nil : Motion.feedback, value: showing)
+        .accessibilityLabel("\(day.label), \(day.words) words, \(day.recordingsLine), \(day.minutesSaved(typingWPM: typingWPM)) minutes of typing avoided")
+        .accessibilityHint("Show this day's details")
     }
 
     private var panel: some View {
@@ -157,6 +175,7 @@ private struct StatCard: View {
     let value: String
     let caption: String
     let style: Style
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var bg: Color { style == .marigold ? Theme.marigold : Theme.card }
     private var labelColor: Color { style == .marigold ? Theme.marigoldInk2 : Theme.muted }
@@ -170,10 +189,12 @@ private struct StatCard: View {
                 Text(label).font(Typo.font(11.5, 700)).tracking(0.08 * 11.5).foregroundColor(labelColor)
             }
             Text(value).textStyle(.statReceipts).foregroundColor(valueColor)
+                .contentTransition(.numericText())
             Text(caption).font(Typo.font(13, 400)).foregroundColor(captionColor)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.cardSmall).fill(bg))
+        .animation(reduceMotion ? nil : Motion.page, value: value)
     }
 }

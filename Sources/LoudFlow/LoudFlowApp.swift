@@ -19,6 +19,7 @@ struct LoudFlowApp: App {
 /// OS-level panel (see `WidgetPanelController`), not part of this view tree.
 struct RootView: View {
     @ObservedObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -28,7 +29,7 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 980, minHeight: 680)
-        .animation(.easeOut(duration: 0.2), value: model.showingOnboarding)
+        .animation(reduceMotion ? nil : Motion.page, value: model.showingOnboarding)
         .background(LiveResizeFix())
     }
 }

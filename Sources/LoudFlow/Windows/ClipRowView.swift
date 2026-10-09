@@ -15,6 +15,8 @@ struct ClipRowView: View {
 
     @State private var hovering = false
     @State private var justCopied = false
+    @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isPlaying: Bool { model.playingId == clip.id }
     private var isSelected: Bool { model.selectedId == clip.id }
@@ -22,6 +24,9 @@ struct ClipRowView: View {
     private var rowGap: CGFloat { variant == .today ? 14 : 12 }
     private var hPad: CGFloat { variant == .today ? 13 : 12 }
     private var isTranscribing: Bool { model.transcribingIds.contains(clip.id) }
+    private var copyVisible: Bool {
+        hovering || focused || (variant == .library && isSelected) || justCopied
+    }
     private var previewText: String {
         if isTranscribing { return "Transcribing…" }
         if clip.needsTranscription { return "Transcription didn't finish" }
@@ -32,7 +37,7 @@ struct ClipRowView: View {
         if hovering { return Theme.rowHover }
         switch variant {
         case .today:   return Theme.row
-        case .library: return isSelected ? Theme.rowSelected : .clear
+        case .library: return .clear
         }
     }
 
@@ -64,16 +69,22 @@ struct ClipRowView: View {
                     SolarIcon(name: leadingIcon,
                               size: variant == .today ? 14 : 15,
                               color: circleInk)
+                        .id(leadingIcon)
+                        .transition(.opacity)
                 }
                 .frame(width: playSize, height: playSize)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressFeedbackStyle())
             .clickable()
             .help(clip.audioDeleted ? "Audio cleared by retention" : "")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(previewText)
                     .font(Typo.font(14, isSelected && variant == .library ? 700 : 400))
+                    // Nunito gains width as its variable weight axis gets heavier. Tighten
+                    // letter spacing in the selected state so the same title doesn't lurch
+                    // sideways when its weight changes.
+                    .tracking(isSelected && variant == .library ? -0.18 : 0)
                     .foregroundColor(clip.needsTranscription ? Theme.muted : Theme.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -96,6 +107,22 @@ struct ClipRowView: View {
         .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.rowInner))
         .onHover { hovering = $0 }
         .onTapGesture { model.openClip(clip.id) }
+        .focusable()
+        .focused($focused)
+        .focusEffectDisabled()
+        .onKeyPress(.return) {
+            model.openClip(clip.id)
+            return .handled
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(previewText)
+        .accessibilityHint("Open transcript")
+        .accessibilityValue(isSelected && variant == .library ? "Selected" : "")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { model.openClip(clip.id) }
+        .animation(reduceMotion ? nil : Motion.feedback, value: hovering)
+        .animation(reduceMotion ? nil : Motion.selection, value: isSelected)
+        .animation(reduceMotion ? nil : Motion.feedback, value: leadingIcon)
         .clickable()
     }
 
@@ -127,7 +154,7 @@ struct ClipRowView: View {
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(Capsule().fill(Theme.marigoldPale))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressFeedbackStyle())
             .clickable()
         } else {
             // Copy pill — hidden until hover. One button: a meeting copies with speaker names,
@@ -140,12 +167,11 @@ struct ClipRowView: View {
                 .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(Capsule().fill(Theme.sagePale))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressFeedbackStyle())
             .clickable()
-            .opacity(hovering || justCopied ? 1 : 0)
-            .allowsHitTesting(hovering)
-            .animation(.easeInOut(duration: 0.14), value: hovering)
-            .animation(.easeInOut(duration: 0.15), value: justCopied)
+            .opacity(copyVisible ? 1 : 0)
+            .allowsHitTesting(copyVisible)
+            .animation(reduceMotion ? nil : Motion.feedback, value: copyVisible)
         }
     }
 }

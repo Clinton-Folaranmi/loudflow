@@ -2,13 +2,15 @@ import AppKit
 import SwiftUI
 
 /// The three screen edges the widget can dock to (top is reserved for the menu bar).
-enum WidgetEdge { case left, right, bottom }
+enum WidgetEdge: Equatable { case left, right, bottom }
 
 /// A full-screen, click-through overlay shown while dragging the widget. It highlights the
 /// three dockable edges and emphasizes the one the widget will snap to.
 final class SnapGuideController {
     private let panel: NSPanel
     private let hosting: NSHostingView<SnapGuideView>
+    private var shown = false
+    private var currentTarget: WidgetEdge?
 
     init() {
         panel = NSPanel(contentRect: .zero,
@@ -25,18 +27,29 @@ final class SnapGuideController {
         hosting.autoresizingMask = [.width, .height]
     }
 
-    func show(target: WidgetEdge?) {
-        guard let vf = NSScreen.main?.visibleFrame else { return }
+    func show(target: WidgetEdge?, in vf: NSRect) {
+        if shown { update(target: target, in: vf); return }
         panel.setFrame(vf, display: false)
         hosting.rootView = SnapGuideView(target: target)
         panel.orderFrontRegardless()
+        currentTarget = target
+        shown = true
     }
 
-    func update(target: WidgetEdge?) {
+    func update(target: WidgetEdge?, in vf: NSRect) {
+        guard shown else { show(target: target, in: vf); return }
+        if panel.frame != vf { panel.setFrame(vf, display: false) }
+        guard currentTarget != target else { return }
         hosting.rootView = SnapGuideView(target: target)
+        currentTarget = target
     }
 
-    func hide() { panel.orderOut(nil) }
+    func hide() {
+        guard shown else { return }
+        panel.orderOut(nil)
+        shown = false
+        currentTarget = nil
+    }
 }
 
 private struct SnapGuideView: View {
