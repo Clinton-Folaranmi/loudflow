@@ -30,8 +30,11 @@ struct ClipRowView: View {
     private var previewText: String {
         if isTranscribing { return "Transcribing…" }
         if clip.needsTranscription { return "Transcription didn't finish" }
+        if clip.isConversation, let title = clip.title { return title }
         return clip.preview(voices: model.voices.voices)
     }
+
+    private var hasMeetingTitle: Bool { clip.isConversation && clip.title != nil }
 
     private var background: Color {
         if hovering { return Theme.rowHover }
@@ -88,6 +91,13 @@ struct ClipRowView: View {
                     .foregroundColor(clip.needsTranscription ? Theme.muted : Theme.ink)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if hasMeetingTitle {
+                    Text(clip.preview(voices: model.voices.voices))
+                        .font(Typo.font(11.5, 600))
+                        .foregroundColor(Theme.body)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 Text(clip.metadataLine)
                     .font(Typo.font(11.5, 600))
                     .foregroundColor(Theme.muted)

@@ -53,7 +53,7 @@ struct LibraryView: View {
             Image(systemName: "magnifyingglass").font(.system(size: 14, weight: .semibold)).foregroundColor(Theme.muted)
             ZStack(alignment: .leading) {
                 if model.librarySearch.isEmpty {
-                    Text("Search transcripts")
+                    Text("Search titles or transcripts")
                         .font(Typo.font(13, 600))
                         .foregroundColor(Theme.muted)
                         .allowsHitTesting(false)
@@ -65,7 +65,7 @@ struct LibraryView: View {
                     .textFieldStyle(.plain)
                     .font(Typo.font(13, 600))
                     .foregroundColor(Theme.ink)
-                    .accessibilityLabel("Search transcripts")
+                    .accessibilityLabel("Search titles or transcripts")
             }
             if !model.librarySearch.isEmpty {
                 Button { model.setLibrarySearch("") } label: {
@@ -188,6 +188,8 @@ private struct EditorPane: View {
     @State private var renamingVoice: Int?
     @State private var justCopied = false
     @State private var justSaved = false
+    @State private var meetingTitle: String
+    @FocusState private var titleFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: AppModel, clip: Clip) {
@@ -198,6 +200,7 @@ private struct EditorPane: View {
             : clip.sentences
         _blocks = State(initialValue: initialBlocks)
         _savedBlocks = State(initialValue: initialBlocks)
+        _meetingTitle = State(initialValue: clip.title ?? "")
     }
 
     private var isPlaying: Bool { model.playingId == clip.id }
@@ -220,6 +223,7 @@ private struct EditorPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if clip.isConversation { meetingTitleField }
             metadata
 
             // Once retention has swept the audio there is no player to show — the strip says
@@ -247,10 +251,37 @@ private struct EditorPane: View {
         .onChange(of: model.editingTranscript) { editing in
             if !editing && clip.isConversation { commitDraft() }
         }
-        .onDisappear(perform: commitDraft)
+        .onDisappear {
+            commitDraft()
+            saveMeetingTitle()
+        }
     }
 
     // MARK: Metadata + transport
+
+    private var meetingTitleField: some View {
+        HStack(spacing: 8) {
+            TextField("Name this meeting", text: $meetingTitle)
+                .textFieldStyle(.plain)
+                .font(Typo.font(18, 800))
+                .foregroundColor(Theme.creamInk)
+                .focused($titleFocused)
+                .onSubmit(saveMeetingTitle)
+                .onChange(of: titleFocused) { _, focused in
+                    if !focused { saveMeetingTitle() }
+                }
+                .accessibilityLabel("Meeting title")
+            SolarIcon(name: Solar.pen, size: 14, color: Theme.creamMuted)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func saveMeetingTitle() {
+        guard clip.isConversation else { return }
+        let trimmed = meetingTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        meetingTitle = trimmed
+        model.renameMeeting(clip.id, to: trimmed)
+    }
 
     private var metadata: some View {
         HStack(spacing: 10) {

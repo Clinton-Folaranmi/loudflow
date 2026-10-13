@@ -805,7 +805,8 @@ final class AppModel: ObservableObject {
             guard libraryFilter.matches(clip) else { return false }
             guard !query.isEmpty else { return true }
             let speakers = clip.speakerIds.compactMap { voices.voice($0)?.name }.joined(separator: " ")
-            return (clip.text + " " + speakers).localizedCaseInsensitiveContains(query)
+            return ((clip.title ?? "") + " " + clip.text + " " + speakers)
+                .localizedCaseInsensitiveContains(query)
         }
     }
 
@@ -831,6 +832,21 @@ final class AppModel: ObservableObject {
     }
 
     func openClip(_ id: UUID) { selectedId = id; editingTranscript = false; tab = .library }
+
+    /// A title belongs to this meeting alone; clearing it restores the transcript preview.
+    func renameMeeting(_ id: UUID, to name: String) {
+        guard let idx = clips.firstIndex(where: { $0.id == id }),
+              clips[idx].isConversation else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = trimmed.isEmpty ? nil : trimmed
+        guard clips[idx].title != title else { return }
+        clips[idx].title = title
+        persist()
+        if !filteredClips.contains(where: { $0.id == selectedId }) {
+            editingTranscript = false
+            selectedId = filteredClips.first?.id
+        }
+    }
 
     /// One Copy button, no variants: a meeting copies as labelled blocks, a note copies bare.
     /// Confirmation is the calling button's own state, not a toast — see `EditorPane.copyTapped`

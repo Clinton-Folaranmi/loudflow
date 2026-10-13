@@ -23,6 +23,9 @@ struct Clip: Identifiable, Codable, Equatable {
     var seconds: Int
     var sizeBytes: Int64
     var text: String
+    /// User-given title for a meeting. Older clips have no title and keep their transcript
+    /// preview in the Library list.
+    var title: String? = nil
     /// Speaker turns, when diarization found more than one voice. Single-voice clips leave
     /// this nil and live entirely in `text`; for a conversation, `text` is kept in sync as the
     /// flat transcript so word counts and search don't have to special-case it.
@@ -45,6 +48,7 @@ struct Clip: Identifiable, Codable, Equatable {
          seconds: Int,
          sizeBytes: Int64,
          text: String,
+         title: String? = nil,
          turns: [Turn]? = nil,
          audioFileName: String,
          twoTrack: Bool = false,
@@ -55,6 +59,7 @@ struct Clip: Identifiable, Codable, Equatable {
         self.seconds = seconds
         self.sizeBytes = sizeBytes
         self.text = text
+        self.title = title
         self.turns = turns
         self.audioFileName = audioFileName
         self.twoTrack = twoTrack
