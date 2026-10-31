@@ -3,7 +3,7 @@
 A personal macOS dictation app I made for myself. A small always-on-top widget floats over whatever app
 you're using. Click it (or hold a key / double-tap Control), talk, and when you stop it
 types the **raw transcript** straight into the field your cursor is in. Audio and transcript
-are kept locally so you can open the app and fix a the transcript manually.
+are kept locally so you can open the app and fix the transcript manually.
 
 ---
 
