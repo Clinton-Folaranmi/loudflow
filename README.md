@@ -1,9 +1,9 @@
 # LoudFlow
 
-A personal macOS dictation app. A small always-on-top widget floats over whatever app
+A personal macOS dictation app I made for myself. A small always-on-top widget floats over whatever app
 you're using. Click it (or hold a key / double-tap Control), talk, and when you stop it
 types the **raw transcript** straight into the field your cursor is in. Audio and transcript
-are kept locally so you can open the app and fix a mis-heard name or number.
+are kept locally so you can open the app and fix a the transcript manually.
 
 ---
 
@@ -17,8 +17,6 @@ Prerequisites: macOS 14.2+, Xcode 15+, and [XcodeGen](https://github.com/yonasko
 xcodegen generate             # writes LoudFlow.xcodeproj
 open LoudFlow.xcodeproj        # then run with ⌘R
 ```
-
-> Don't want to install XcodeGen? Ask and a ready-made `.xcodeproj` can be provided instead.
 
 ### Permissions the app asks for
 - **Microphone** — to record. Prompted on first record.
