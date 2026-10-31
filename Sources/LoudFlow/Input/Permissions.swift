@@ -4,16 +4,7 @@ import AppKit
 import ApplicationServices
 import IOKit.hid
 
-/// Microphone and Accessibility permission helpers.
-///
-/// - **Microphone**: standard AVFoundation TCC prompt (also needs the Info.plist usage string).
-/// - **Accessibility**: required for the global hold/double-tap hotkeys and for typing text
-///   into other apps. There is no programmatic grant — the user flips it in
-///   System Settings → Privacy & Security → Accessibility. `requestAccessibility()` shows the
-///   system prompt and opens the pane.
 enum Permissions {
-
-    // MARK: Microphone
 
     static func micStatus() -> AVAuthorizationStatus {
         AVCaptureDevice.authorizationStatus(for: .audio)
@@ -32,13 +23,16 @@ enum Permissions {
         }
     }
 
-    // MARK: Accessibility
-
     static func hasAccessibility() -> Bool {
         AXIsProcessTrusted()
     }
 
-    /// Shows the system Accessibility prompt (if not yet trusted) and opens the pane.
+    static var pastePermissionMessage: String {
+        let section = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+            ? "Device Control and Data Access" : "Accessibility"
+        return "Copied. Automatic paste needs \(section) access for this copy of LoudFlow. If already allowed, remove and re-add LoudFlow there, then relaunch."
+    }
+
     @discardableResult
     static func requestAccessibility() -> Bool {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -47,8 +41,6 @@ enum Permissions {
         return trusted
     }
 
-    /// Shows the system Accessibility prompt (once) without force-opening System Settings.
-    /// Used when an auto-type attempt fails because trust isn't granted.
     static func nudgeAccessibility() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
@@ -60,10 +52,6 @@ enum Permissions {
         }
     }
 
-    // MARK: Input Monitoring
-
-    /// Modern macOS can require Input Monitoring (in addition to Accessibility) for a keyboard
-    /// event tap to actually receive key events.
     static func hasInputMonitoring() -> Bool {
         IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
     }

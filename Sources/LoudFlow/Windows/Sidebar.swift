@@ -16,7 +16,6 @@ struct Sidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // Brand
             HStack(spacing: 9) {
                 ZStack {
                     RoundedRectangle(cornerRadius: Theme.Radius.logo).fill(Theme.sage)
@@ -29,7 +28,6 @@ struct Sidebar: View {
                     .foregroundColor(Theme.ink)
             }
 
-            // Nav
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(navItems, id: \.tab) { item in
                     NavRow(model: model, tab: item.tab, label: item.label, icon: item.icon,
@@ -41,10 +39,8 @@ struct Sidebar: View {
 
             Rectangle().fill(Theme.hairline).frame(height: 1)
 
-            // Storage — opens the folder the recordings actually live in.
             StorageButton(model: model)
 
-            // Version
             Text(Self.versionString)
                 .font(Typo.font(10.5, 600))
                 .foregroundColor(Theme.countInactive)
@@ -56,8 +52,6 @@ struct Sidebar: View {
         .animation(reduceMotion ? nil : Motion.selection, value: model.tab)
     }
 
-    /// `LoudFlow 1.4.0 (10) · design 4` — the design version rides along with the build
-    /// number while the design is in flux, so a stale build is visible at a glance.
     static var versionString: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
@@ -120,8 +114,6 @@ private struct NavRow: View {
     }
 }
 
-/// The "ON THIS MAC" storage meter, doubling as a button to `audio/` in Finder — the folder the
-/// recordings actually live in, not just a number about them.
 private struct StorageButton: View {
     @ObservedObject var model: AppModel
     @State private var hovering = false

@@ -1,8 +1,6 @@
 import Foundation
 import Security
 
-/// Minimal Keychain wrapper for the transcription API key. The key is **never** written to
-/// UserDefaults — only here. Keyed per provider so switching providers keeps both keys.
 enum Keychain {
     private static let service = "com.loudflow.app.transcription"
 
@@ -10,7 +8,6 @@ enum Keychain {
         let account = provider.rawValue
         let data = Data(value.utf8)
 
-        // Delete any existing item first, then add (simplest correct upsert).
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

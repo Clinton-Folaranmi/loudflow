@@ -24,8 +24,6 @@ struct LibraryView: View {
                 librarySearch
             }
 
-            // Both columns fill the window height and scroll inside themselves, so opening a
-            // long transcript never scrolls the clip list away.
             TwoColumn(leftFr: 1, rightFr: 1.15, fillHeight: true) {
                 listCard
             } right: {
@@ -35,8 +33,6 @@ struct LibraryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// `All` · `Notes` · `Meetings`. The kind of a clip is derived from how many voices are in
-    /// it, so these only ever narrow the same list.
     private var filterChips: some View {
         HStack(spacing: 8) {
             ForEach(LibraryFilter.allCases, id: \.self) { filter in
@@ -114,8 +110,6 @@ struct LibraryView: View {
             )
             .onPreferenceChange(ListContentKey.self) { contentFrame = $0 }
             .onPreferenceChange(ListViewportKey.self) { viewportHeight = $0 }
-            // Edge fades — the design's `edgeFade`, shown only on the side that still has list
-            // to reach, so the first and last rows aren't dimmed for nothing.
             .overlay(alignment: .top) {
                 edgeFade(height: 18, top: true).opacity(fadeTop ? 1 : 0)
             }
@@ -127,8 +121,6 @@ struct LibraryView: View {
         }
     }
 
-    // The content frame is measured in the scroll view's own space: it starts above the top
-    // edge once scrolled, and ends past the bottom edge while there is more to come.
     private var fadeTop: Bool { contentFrame.minY < -1 }
     private var fadeBottom: Bool { contentFrame.maxY > viewportHeight + 1 }
 
@@ -143,10 +135,8 @@ struct LibraryView: View {
 
     @ViewBuilder private var editorSide: some View {
         if let clip = model.selectedClip {
-            // Keyed on the clip id so the editor fully remounts when the selection changes —
-            // otherwise the previous clip's edited text would persist in the field.
-            // Key on transcription-state too, so the field remounts (and picks up the text)
-            // when a retry fills in a previously-empty transcript.
+
+            // Remount the local draft when selection or transcription state changes.
             EditorPane(model: model, clip: clip)
                 .id("\(clip.id)-\(clip.needsTranscription)")
         } else {
@@ -161,8 +151,6 @@ struct LibraryView: View {
     }
 }
 
-/// Frame of the clip list's content inside its scroll view, and the height of the scroll
-/// viewport — together they say which edge fade should be showing.
 private struct ListContentKey: PreferenceKey {
     static var defaultValue: CGRect = .zero
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
@@ -179,8 +167,6 @@ private struct EditorPane: View {
     @ObservedObject var model: AppModel
     let clip: Clip
 
-    /// A note's sentences and a conversation's turns are both edited as a list of strings, so
-    /// one buffer covers both.
     @State private var blocks: [String]
     @State private var savedBlocks: [String]
     @State private var flashBg: Color = Theme.card
@@ -214,7 +200,6 @@ private struct EditorPane: View {
     private var isDirty: Bool { blocks != savedBlocks }
     private var isTranscribing: Bool { model.transcribingIds.contains(clip.id) }
 
-    /// A conversation is read by default; a note is always editable in place.
     private var editingConversation: Bool { clip.isConversation && model.editingTranscript }
 
     private var transcriptLabel: String {
@@ -226,8 +211,6 @@ private struct EditorPane: View {
             if clip.isConversation { meetingTitleField }
             metadata
 
-            // Once retention has swept the audio there is no player to show — the strip says
-            // so instead of leaving a dead transport behind.
             if clip.audioDeleted {
                 retentionStrip
             } else {
@@ -256,8 +239,6 @@ private struct EditorPane: View {
             saveMeetingTitle()
         }
     }
-
-    // MARK: Metadata + transport
 
     private var meetingTitleField: some View {
         HStack(spacing: 8) {
@@ -356,8 +337,6 @@ private struct EditorPane: View {
         .background(RoundedRectangle(cornerRadius: Theme.Radius.editor).fill(Theme.creamChip))
     }
 
-    // MARK: Transcript
-
     private var transcript: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -370,8 +349,6 @@ private struct EditorPane: View {
                     .foregroundColor(Theme.muted)
             }
 
-            // Takes whatever height is left in the pane and scrolls its own text — a long
-            // transcript never pushes the actions (or the clip list) away.
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     if clip.isConversation {
@@ -381,7 +358,6 @@ private struct EditorPane: View {
                     }
                 }
                 .onChange(of: activeIndex) { index in
-                    // Follow playback, but never while the caret is in a field.
                     guard let index, !model.editingTranscript else { return }
                     if reduceMotion { proxy.scrollTo(index, anchor: .center) }
                     else { withAnimation(Motion.page) { proxy.scrollTo(index, anchor: .center) } }
@@ -419,9 +395,6 @@ private struct EditorPane: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// A note's sentences: plain editable text, flush. The gutter play handle, the hover tint,
-    /// and click-to-seek are gone — a fourteen-second clip doesn't need them, and the scrubber
-    /// covers it. The playback highlight stays.
     private var sentenceBlocks: some View {
         LazyVStack(alignment: .leading, spacing: 2) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { i, _ in
@@ -448,7 +421,6 @@ private struct EditorPane: View {
         )
     }
 
-    /// The block the playhead is inside, for the highlight and the auto-scroll.
     private var activeIndex: Int? {
         guard isPlaying else { return nil }
         if clip.isConversation { return model.activeTurnIndex(in: clip) }
@@ -456,9 +428,6 @@ private struct EditorPane: View {
         return clip.sentenceRanges.lastIndex { $0.start <= now }
     }
 
-    // MARK: Retry
-
-    // Shown in place of the editor when a clip has audio but no transcript yet.
     private var retryPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("TRANSCRIPT")
@@ -473,7 +442,6 @@ private struct EditorPane: View {
                         .font(Typo.font(15, 700)).foregroundColor(Theme.creamInk)
 
                     if clip.audioDeleted {
-                        // Nothing to send: the sweep got there first. No retry button.
                         Text("The audio was cleared by retention before this one transcribed, so there's nothing left to send.")
                             .font(Typo.font(12.5, 400))
                             .foregroundColor(Theme.creamMuted)
@@ -507,13 +475,10 @@ private struct EditorPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // MARK: Actions
-
     private var actions: some View {
         HStack(spacing: 8) {
             if !clip.needsTranscription {
                 if clip.isConversation {
-                    // Read by default: the primary button opens editing, and closing it commits.
                     Button(action: toggleConversationEditing) {
                         pill(icon: model.editingTranscript ? Solar.check : Solar.pen,
                              title: model.editingTranscript ? "Done editing" : "Edit transcript",
@@ -549,9 +514,6 @@ private struct EditorPane: View {
         }
     }
 
-    /// Confirmation is the button swapping its own icon and label to a checkmark and "Copied" —
-    /// not the widget's toast, which lives elsewhere on screen and doesn't make sense as
-    /// feedback for a button you're looking right at.
     private func copyTapped() {
         model.copySelected()
         justCopied = true
@@ -580,8 +542,6 @@ private struct EditorPane: View {
         }
     }
 
-    /// The pane is keyed by clip ID, so it disappears on selection changes. Commit to that
-    /// captured ID rather than the model's new selected ID; this also protects tab changes.
     private func commitDraft() {
         guard isDirty else { return }
         if clip.isConversation {
@@ -592,7 +552,6 @@ private struct EditorPane: View {
         savedBlocks = blocks
     }
 
-    // Delete asks first (irreversible: removes audio + transcript, no undo).
     @ViewBuilder private var deleteControl: some View {
         if confirmingDelete {
             HStack(spacing: 6) {
@@ -633,7 +592,6 @@ private struct EditorPane: View {
         .background(Capsule().fill(bg))
     }
 
-    /// fGlow: flash the field when text has just landed in this clip, then settle to base.
     private func maybeFlash() {
         guard model.flashClipId == clip.id else { flashBg = Theme.card; return }
         flashBg = Theme.marigoldFlash

@@ -1,41 +1,23 @@
 import Foundation
 import AVFoundation
 
-/// Records a clip as **two tracks**: the microphone on channel 0 and whatever the Mac is
-/// playing on channel 1.
-///
-/// That split is the point. Because your voice arrives on its own channel, speaker 0 is always
-/// you — the provider never has to guess — and diarization only has to divide the remote side.
-/// It is not a setting and there is no meeting mode: a recording with one voice in it is a
-/// note, a recording with several is a conversation, and that is decided afterwards by what was
-/// actually heard.
-///
-/// System audio is captured with a Core Audio process tap (see `SystemAudioTap`), which asks
-/// for audio-capture permission and nothing else. When that isn't granted, or nothing was
-/// playing, the clip is written as a plain mono file and everything downstream still works.
-///
-/// Nothing live is surfaced while recording — the widget shows a dot and a timer, per the spec.
 final class AudioRecorder: NSObject {
 
     struct Outcome {
         let duration: TimeInterval
-        /// True when the finished file really has two distinct channels.
         let twoTrack: Bool
     }
 
     private let engine = AVAudioEngine()
     private var micFile: AVAudioFile?
-    private var system: Any?              // SystemAudioTap on macOS 14.2+
+    private var system: Any?
     private var startedAt: Date?
     private var target: URL?
     private var micScratch: URL?
     private var systemScratch: URL?
     private(set) var isRecording = false
 
-    /// Encoded output: 16 kHz is plenty for speech and keeps clips small and upload-fast.
     private static let outputRate: Double = 16_000
-
-    // MARK: - Start
 
     func start(to url: URL) throws {
         guard !isRecording else { return }
@@ -78,16 +60,13 @@ final class AudioRecorder: NSObject {
         startedAt = Date()
         isRecording = true
 
-        // The other half of the call. Best-effort: a refusal here just means a mono clip.
         if #available(macOS 14.2, *) {
             let tap = SystemAudioTap()
+
             system = tap.start(to: sys) ? tap : nil
         }
     }
 
-    // MARK: - Stop
-
-    /// Stops both tracks, encodes them into the clip's `.m4a`, and reports what was captured.
     func stop() async -> Outcome {
         guard isRecording else { return Outcome(duration: 0, twoTrack: false) }
         isRecording = false
@@ -136,10 +115,6 @@ final class AudioRecorder: NSObject {
         startedAt = nil
     }
 
-    // MARK: - Encoding
-
-    /// Writes the AAC clip. Two channels when there is real system audio to put on channel 1,
-    /// one when there isn't. Returns whether the file ended up two-track.
     private static func encode(mic: URL, system: URL?, to target: URL) -> Bool {
         guard let monoFormat = AVAudioFormat(standardFormatWithSampleRate: outputRate, channels: 1),
               let micSamples = resampled(mic, to: monoFormat)
@@ -181,7 +156,6 @@ final class AudioRecorder: NSObject {
         for i in available..<Int(frames) { destination[i] = 0 }
     }
 
-    /// Reads a whole scratch track and resamples it to the output format, downmixing to mono.
     private static func resampled(_ url: URL, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
         guard let file = try? AVAudioFile(forReading: url), file.length > 0 else { return nil }
         let sourceFormat = file.processingFormat

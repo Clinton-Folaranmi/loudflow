@@ -1,7 +1,5 @@
 import Foundation
 
-/// Non-secret user settings, persisted in UserDefaults. (The API key is the one thing that
-/// does NOT live here — it's in the Keychain; see `Keychain`.)
 enum Preferences {
     private static let d = UserDefaults.standard
 
@@ -13,7 +11,7 @@ enum Preferences {
         static let provider = "provider"
         static let onboarded = "onboarded"
         static let wordsToday = "wordsToday"
-        static let wordsTodayDay = "wordsTodayDay"   // yyyy-ddd to reset the counter daily
+        static let wordsTodayDay = "wordsTodayDay"
         static let vocabulary = "vocabulary"
         static let playbackRate = "playbackRate"
     }
@@ -46,7 +44,6 @@ enum Preferences {
         set { d.set(newValue.rawValue, forKey: Key.provider) }
     }
 
-    /// What the greeting calls you. nil = fall back to the macOS account first name.
     static var displayName: String? {
         get {
             let s = d.string(forKey: "displayName")?.trimmingCharacters(in: .whitespaces)
@@ -66,7 +63,6 @@ enum Preferences {
         set { d.set(newValue, forKey: Key.onboarded) }
     }
 
-    /// Words dictated today, reset when the day rolls over.
     static var wordsToday: Int {
         get {
             if d.string(forKey: Key.wordsTodayDay) != Self.todayStamp { return 0 }
@@ -83,9 +79,6 @@ enum Preferences {
     }()
     private static var todayStamp: String { dayStampFormatter.string(from: Date()) }
 
-    /// Names, jargon and spellings to bias transcription toward. Sent to whichever provider is
-    /// active — see `Transcriber.transcribe(_:twoTrack:vocabulary:)`. Order is preserved so the
-    /// Settings list doesn't reshuffle as you add to it.
     static var vocabulary: [String] {
         get { d.stringArray(forKey: Key.vocabulary) ?? [] }
         set { d.set(newValue, forKey: Key.vocabulary) }
@@ -100,8 +93,6 @@ enum Preferences {
         set { d.set(newValue, forKey: Key.playbackRate) }
     }
 
-    /// The floating widget's saved bottom-left origin (screen coords), or nil to use the
-    /// default bottom-right position.
     static var widgetOrigin: CGPoint? {
         get {
             guard d.object(forKey: "widget.x") != nil else { return nil }

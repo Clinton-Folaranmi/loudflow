@@ -10,7 +10,7 @@ set -euo pipefail
 CN="LoudFlow Self-Signed"
 KC="$HOME/Library/Keychains/login.keychain-db"
 
-if security find-identity -v 2>/dev/null | grep -q "$CN"; then
+if security find-certificate -a -c "$CN" -Z "$KC" 2>/dev/null | grep -q 'SHA-1 hash:'; then
   echo "Identity '$CN' already present."
   exit 0
 fi

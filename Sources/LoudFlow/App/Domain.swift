@@ -2,7 +2,6 @@ import Foundation
 
 // MARK: - Trigger mode
 
-/// How recording starts. Exactly one is active; the widget's label and keycap reflect it.
 enum TriggerMode: String, CaseIterable, Codable {
     case click, hold, double
 
@@ -14,7 +13,6 @@ enum TriggerMode: String, CaseIterable, Codable {
         }
     }
 
-    /// The keycap combo shown in the widget / settings.
     var combo: String {
         switch self {
         case .click:  return "no keys"
@@ -31,7 +29,6 @@ enum TriggerMode: String, CaseIterable, Codable {
         }
     }
 
-    /// Solar icon name (see `Solar`).
     var iconName: String {
         switch self {
         case .click:  return Solar.cursor
@@ -67,7 +64,6 @@ enum Retention: String, CaseIterable, Codable {
         }
     }
 
-    /// Days after which audio is swept; nil = never.
     var days: Int? {
         switch self {
         case .sevenDays:  return 7
@@ -88,8 +84,6 @@ enum Retention: String, CaseIterable, Codable {
 
 // MARK: - Provider
 
-/// Cloud transcription provider. Deepgram is the shipping default; Whisper slots in behind
-/// the same `Transcriber` protocol.
 enum Provider: String, CaseIterable, Codable {
     case deepgram, whisper
     var displayName: String {
@@ -99,8 +93,6 @@ enum Provider: String, CaseIterable, Codable {
         }
     }
 
-    /// Where to go and get a key, linked from Settings when there isn't one (or it was
-    /// rejected). Nothing transcribes without it, so the app points at the door.
     var keyURL: URL {
         switch self {
         case .deepgram: return URL(string: "https://console.deepgram.com/signup")!
@@ -111,36 +103,26 @@ enum Provider: String, CaseIterable, Codable {
 
 // MARK: - Options (the two settings toggles)
 
-/// The only two switches in Settings.
-///
-/// There is deliberately no formatting toggle: punctuation, paragraph breaks, and readable
-/// numbers are the ASR model's own output rather than a rewrite, so they are always on. And
-/// there is no speakers toggle — two-track capture is how recording works, not a preference.
 struct DictationOptions: Codable, Equatable {
-    /// Type the transcript into the frontmost field; off = clipboard only.
     var insert: Bool = true
-    /// Keep the audio, not just the text.
     var keep: Bool = true
 }
 
 // MARK: - Widget state
 
-/// What the floating widget is currently showing. The error/queued cases are net-new
-/// (the spec had no failure state) and were added with the app owner's sign-off.
 enum WidgetState: Equatable {
     case idle
     case recording
     case transcribing
-    case queued              // saved locally, waiting for the network
+    case queued
     case error(TranscriptionFailure)
 }
 
-/// The distinct transcription failures the widget surfaces, each with its own copy + action.
 enum TranscriptionFailure: Equatable {
-    case missingKey          // no key set yet
-    case rejectedKey         // provider returned 401/403
-    case outOfCredit         // provider returned payment/quota error
-    case network             // treated as "queued", not a hard error, but kept for completeness
+    case missingKey
+    case rejectedKey
+    case outOfCredit
+    case network
 
     var message: String {
         switch self {

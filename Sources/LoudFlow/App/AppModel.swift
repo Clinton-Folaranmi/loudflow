@@ -4,8 +4,6 @@ import Combine
 
 enum Tab: String, CaseIterable { case today, library, settings, receipts }
 
-/// The Library's filter chips. A clip's kind is derived from how many voices are in it, so
-/// these are just views onto the same list — there is no mode to switch on.
 enum LibraryFilter: String, CaseIterable {
     case all, notes, meetings
 
@@ -31,46 +29,34 @@ struct Toast: Identifiable, Equatable {
     var message: String
 }
 
-/// The single source of truth. Mirrors the spec's state model and adds the real-world bits:
-/// permissions, the API-key status, the offline queue, and the widget error states.
 @MainActor
 final class AppModel: ObservableObject {
 
-    // MARK: Navigation
     @Published var showingOnboarding: Bool
-    @Published var onboardingStep: Int = 0          // 0…3 (now four steps)
+    @Published var onboardingStep: Int = 0
     @Published var tab: Tab = .today
 
-    // MARK: Settings (mirrored to Preferences)
     @Published var trigger: TriggerMode { didSet { Preferences.trigger = trigger; hotkeys.setMode(trigger) } }
     @Published var retention: Retention { didSet { Preferences.retention = retention } }
     @Published var options: DictationOptions { didSet { Preferences.options = options } }
     @Published var provider: Provider { didSet { Preferences.provider = provider; rebuildTranscriber(); refreshKeyStatus() } }
 
-    // MARK: Recording / widget
     @Published var widgetState: WidgetState = .idle
     @Published var elapsed: Int = 0
 
-    // MARK: Clips
     @Published var clips: [Clip]
     @Published var selectedId: UUID?
     @Published var playingId: UUID?
-    /// The playhead per clip (0…1). It belongs to the clip, not the player, so pausing keeps
-    /// the position and the scrubber still shows it when nothing is playing.
     @Published var progressByClip: [UUID: Double] = [:]
     @Published var libraryFilter: LibraryFilter = .all
     @Published var librarySearch = ""
     @Published var playbackRate: Float { didSet { Preferences.playbackRate = playbackRate; player.setRate(playbackRate) } }
-    /// Conversations are read by default; this is the `Edit transcript` / `Done editing` state.
     @Published var editingTranscript = false
     @Published var hoveredId: UUID?
-    @Published var flashClipId: UUID?               // drives the editor fGlow when text lands
-    @Published var transcribingIds: Set<UUID> = []  // clips currently being (re)transcribed
+    @Published var flashClipId: UUID?
+    @Published var transcribingIds: Set<UUID> = []
 
-    // MARK: Feedback
     @Published var toast: Toast?
-    /// Also the name the You voice carries — see `VoiceStore.rename`'s note on why You's name
-    /// is mirrored here rather than settable through the usual per-voice rename flow.
     @Published var displayName: String {
         didSet {
             Preferences.displayName = displayName
@@ -78,31 +64,20 @@ final class AppModel: ObservableObject {
         }
     }
 
-    // MARK: Vocabulary
-    /// Names, jargon and spellings the transcriber tends to get wrong. See `effectiveVocabulary`
-    /// for what actually goes to the provider — this is only the part the user typed in.
     @Published var vocabulary: [String] { didSet { Preferences.vocabulary = vocabulary } }
     private static let vocabularyLimit = 100
 
-    // MARK: Voices
-    /// Stored voice profiles. Naming a voice renames every turn it ever spoke.
     let voices = VoiceStore()
-    /// Matches a new recording's speakers against voices you have already named, on-device.
     let recognizer = VoiceRecognizer()
-    /// The voice whose two-second sample is playing in Settings, if any.
     @Published var playingVoiceId: Int?
 
-    // MARK: Key / permissions status
     enum KeyStatus: Equatable { case missing, saved, checking, rejected }
     @Published var keyStatus: KeyStatus = .missing
 
-    /// Set by the app layer so the model can bring the main window forward.
     var showMainWindow: (() -> Void)?
 
-    // MARK: Plumbing
     private let recorder = AudioRecorder()
     private let player = AudioPlayer()
-    /// Separate from `player` so auditioning a voice in Settings never stops a clip.
     private let samplePlayer = AudioPlayer()
     private var voiceObserver: AnyCancellable?
     private var recognizerObserver: AnyCancellable?
@@ -113,7 +88,6 @@ final class AppModel: ObservableObject {
     private var toastTimer: Timer?
     private var queuedRevertTimer: Timer?
 
-    // Constants from the spec.
     let wpm = 184
 
     init() {
@@ -134,9 +108,6 @@ final class AppModel: ObservableObject {
         self.transcriber = TranscriberFactory.make(provider: prov)
         self.selectedId = clips.first?.id
 
-        // The above assignment doesn't run `didSet` (it's displayName's first-ever set), so
-        // seed You's stored name explicitly — covers a fresh voices.json and a macOS account
-        // name that changed since last launch.
         voices.rename(Voice.youID, to: userFirstName)
 
         refreshKeyStatus()
@@ -146,8 +117,6 @@ final class AppModel: ObservableObject {
     }
 
     private func wireUp() {
-        // The voice store is its own observable; republish so any view watching the model
-        // redraws when a voice is named or forgotten.
         voiceObserver = voices.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         recognizerObserver = recognizer.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
 
@@ -155,7 +124,6 @@ final class AppModel: ObservableObject {
             guard let self, let id = self.playingId else { return }
             self.progressByClip[id] = p
         }
-        // Finishing leaves the playhead at the end rather than snapping back.
         player.onFinish = { [weak self] in self?.playingId = nil }
 
         samplePlayer.onFinish = { [weak self] in self?.playingVoiceId = nil }
@@ -165,11 +133,8 @@ final class AppModel: ObservableObject {
         hotkeys.onDoubleTapToggle = { [weak self] in self?.toggleRecording() }
         hotkeys.setMode(trigger)
 
-        // When the network returns, retry anything still pending.
         queue.onNetworkRestored = { [weak self] in self?.retryPending() }
     }
-
-    // MARK: - Key management
 
     var hasKey: Bool { Keychain.key(for: provider) != nil }
 
@@ -180,7 +145,6 @@ final class AppModel: ObservableObject {
         Keychain.setKey(trimmed, for: provider)
         rebuildTranscriber()
         keyStatus = trimmed.isEmpty ? .missing : .saved
-        // A saved key may unblock clips that failed for auth/credit reasons.
         if !trimmed.isEmpty { retryPending() }
     }
 
@@ -190,7 +154,6 @@ final class AppModel: ObservableObject {
         keyStatus = .missing
     }
 
-    /// Best-effort validation against the provider; updates `keyStatus`.
     func validateKey() {
         guard hasKey else { keyStatus = .missing; return }
         keyStatus = .checking
@@ -202,16 +165,13 @@ final class AppModel: ObservableObject {
 
     private func rebuildTranscriber() { transcriber = TranscriberFactory.make(provider: provider) }
 
-    // MARK: - The core loop
-
     func toggleRecording() {
         if case .recording = widgetState { stopRecording() } else { startRecording() }
     }
 
-    /// Stop recording and throw it away — no clip, no transcript, no upload.
     func cancelRecording() {
         stopTick()
-        recorder.cancel()          // stops and deletes the file
+        recorder.cancel()
         pendingAudio = nil
         elapsed = 0
         widgetState = .idle
@@ -219,14 +179,11 @@ final class AppModel: ObservableObject {
         scheduleToastDismiss()
     }
 
-    /// User explicitly chose a trigger. Only here do we prompt for Accessibility (for the
-    /// hold/double hotkeys) — never on launch or activation.
     func selectTrigger(_ mode: TriggerMode) {
         trigger = mode
         if mode != .click { hotkeys.requestPermissionAndInstall() }
     }
 
-    /// Widget hit targets, routed by trigger mode.
     func widgetClicked() { if trigger != .hold { toggleRecording() } }
     func widgetPressed() { if trigger == .hold { startRecording() } }
     func widgetReleased() { if trigger == .hold { stopRecording() } }
@@ -245,9 +202,6 @@ final class AppModel: ObservableObject {
                 }
                 let target = Persistence.shared.newAudioURL()
                 do {
-                    // Before the recorder starts: starting it (and, with system audio, the tap's
-                    // private aggregate device) is exactly what can fire a CoreAudio device
-                    // change, and the tone should already be running rather than racing it.
                     Earcons.recordStart()
                     try self.recorder.start(to: target.url)
                     self.pendingAudio = target
@@ -268,8 +222,6 @@ final class AppModel: ObservableObject {
         guard recorder.isRecording else { return }
         stopTick()
         Earcons.recordStop()
-        // Closing the system-audio stream and encoding the two tracks takes a moment; the
-        // widget shows `Transcribing…` for that whole stretch rather than flickering to idle.
         widgetState = .transcribing
         Task { await finishRecording() }
     }
@@ -282,8 +234,6 @@ final class AppModel: ObservableObject {
         let secs = max(1, Int(outcome.duration.rounded()))
         let size = Persistence.shared.fileSize(fileName: audio.fileName)
 
-        // The audio is a first-class citizen: persist the clip immediately, even before
-        // (or if we never get) a transcript. It starts life pending.
         let clip = Clip(createdAt: Date(), seconds: secs, sizeBytes: size,
                         text: "", audioFileName: audio.fileName,
                         twoTrack: outcome.twoTrack, status: .pending)
@@ -297,8 +247,6 @@ final class AppModel: ObservableObject {
         transcribe(clipID: clip.id, insertOnFinish: true)
     }
 
-    /// Transcribe a clip. `insertOnFinish` = true only for a fresh recording (paste into the
-    /// focused field + widget feedback); a retry from the library just fills in the transcript.
     private func transcribe(clipID: UUID, insertOnFinish: Bool) {
         guard let clip = clips.first(where: { $0.id == clipID }) else { return }
         let url = Persistence.shared.url(forAudio: clip.audioFileName)
@@ -321,11 +269,6 @@ final class AppModel: ObservableObject {
         transcribingIds.remove(clipID)
         guard let idx = clips.firstIndex(where: { $0.id == clipID }) else { return }
 
-        // No post-processing at all. Punctuation, paragraph breaks, and readable numbers are
-        // the provider's own output; rewording is what the app refuses, and nothing here does
-        // any. What does happen is bookkeeping: the provider's per-recording speaker indices
-        // become stored voice ids, with the mic track pinned to you on a two-track clip (see
-        // `applyTranscript`).
         applyTranscript(result, toClipAt: idx)
         clips[idx].status = .done
         persist()
@@ -335,22 +278,19 @@ final class AppModel: ObservableObject {
         Earcons.transcriptLanded()
 
         guard insert else {
-            // Retry from the library: just fill the transcript, don't paste or touch the widget.
             toast = Toast(message: "Transcribed.")
             scheduleToastDismiss()
             return
         }
 
-        // Fresh recording: insert at the cursor, or fall back to the clipboard.
         var didType = false
         if options.insert {
             didType = TextInserter.insert(text)
-            if !didType { Permissions.nudgeAccessibility() }   // trust missing → guide the user
+            if !didType { Permissions.nudgeAccessibility() }
         } else {
             TextInserter.copyToClipboard(text)
         }
 
-        // If audio isn't being kept, drop the file now (transcript stays).
         if !options.keep {
             Persistence.shared.deleteAudio(fileName: clips[idx].audioFileName)
             clips[idx].audioDeleted = true
@@ -360,7 +300,14 @@ final class AppModel: ObservableObject {
         selectedId = clipID
         flashClipId = clipID
         widgetState = .idle
-        let message = (options.insert && didType) ? "Recording pasted." : "Copied."
+        let message: String
+        if options.insert && text.isEmpty {
+            message = "Transcription was empty."
+        } else if options.insert && !didType {
+            message = Permissions.pastePermissionMessage
+        } else {
+            message = options.insert ? "Recording pasted." : "Copied."
+        }
         toast = Toast(message: message)
         scheduleToastDismiss()
 
@@ -371,7 +318,6 @@ final class AppModel: ObservableObject {
 
     private func handleTranscribeFailure(clipID: UUID, error: TranscriberError, insert: Bool) {
         transcribingIds.remove(clipID)
-        // Keep the clip pending so it can be retried; audio stays.
         if let idx = clips.firstIndex(where: { $0.id == clipID }) { clips[idx].status = .pending; persist() }
         switch error {
         case .network, .server, .decoding: queue.enqueue(clipID)
@@ -379,7 +325,6 @@ final class AppModel: ObservableObject {
         }
 
         guard insert else {
-            // Retry from the library: just tell the user, don't change the widget.
             let msg: String
             switch error {
             case .network, .server, .decoding: msg = "Still couldn't reach the service. Try again in a bit."
@@ -405,7 +350,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Retry a single clip's transcription (from Today / Library).
     func retryTranscription(_ id: UUID) {
         guard let clip = clips.first(where: { $0.id == id }), !transcribingIds.contains(id) else { return }
         guard !clip.audioDeleted else {
@@ -418,7 +362,6 @@ final class AppModel: ObservableObject {
         transcribe(clipID: id, insertOnFinish: false)
     }
 
-    /// Re-attempts every still-pending clip that still has its audio (offline queue drained).
     func retryPending() {
         guard hasKey else { return }
         let pending = clips.filter { $0.status == .pending && !$0.audioDeleted && $0.text.isEmpty }
@@ -427,27 +370,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// The widget error action word: route the user to fix the key.
     func handleWidgetErrorAction() {
         widgetState = .idle
         tab = .settings
         showMainWindow?()
     }
 
-    // MARK: - Transcript → clip
-
-    /// Writes a provider result onto a clip, turning the provider's **local** speaker indices
-    /// into stored voice ids.
-    ///
-    /// Local 0 is the microphone track **only when the clip is two-track** — that split is the
-    /// one thing that actually guarantees local 0 is you, so only then does it map straight to
-    /// `Voice.youID` without guessing. On a single-track clip (system audio declined, or
-    /// nothing was playing) local 0 is just whichever voice diarization happened to hear
-    /// first; pinning it to You there used to mislabel that person permanently, since You can't
-    /// be reassigned away from. Every local index gets its own freshly minted voice instead,
-    /// left for the user (or a confirmed recognizer suggestion, see `recogniseVoices`) to
-    /// attribute — including, on a mono clip, to themselves via the transcript's rename menu.
-    /// Naming any of them later can merge it into a voice already met (see `VoiceStore.rename`).
     private func applyTranscript(_ result: TranscriptionResult, toClipAt idx: Int) {
         guard let localTurns = result.turns, !localTurns.isEmpty else {
             clips[idx].turns = nil
@@ -459,6 +387,8 @@ final class AppModel: ObservableObject {
         for t in localTurns where !order.contains(t.speaker) { order.append(t.speaker) }
 
         let twoTrack = clips[idx].twoTrack
+
+        // Only a two-track recording proves local speaker 0 came from the mic.
         let toMint = twoTrack ? order.filter { $0 != 0 } : order
         let minted = voices.mintVoices(count: toMint.count)
         var map: [Int: Int] = twoTrack ? [0: Voice.youID] : [:]
@@ -470,17 +400,6 @@ final class AppModel: ObservableObject {
         clips[idx].text = clips[idx].flattenedTurns
     }
 
-    /// Asks the on-device recogniser whether any of this clip's new voices is someone already
-    /// named, and — if it's confident — offers that as a suggestion rather than acting on it.
-    ///
-    /// A wrong guess used to repoint the turn immediately and forget the minted stand-in,
-    /// which meant one bad match could silently rewrite a name across the library with no way
-    /// back (see the note on `suggestions`). Confirming or dismissing is now always the user's
-    /// call — `acceptSuggestion` / `rejectSuggestion`, surfaced on the turn as a chip.
-    ///
-    /// Nothing runs — and no model is fetched — until there is at least one named voice with a
-    /// fingerprint to compare against. Until you have named someone, there is nobody to
-    /// recognise.
     private func recogniseVoices(inClip id: UUID) {
         guard let clip = clips.first(where: { $0.id == id }), clip.isConversation, !clip.audioDeleted
         else { return }
@@ -490,10 +409,9 @@ final class AppModel: ObservableObject {
               voices.voices.contains(where: { $0.isNamed && !$0.isYou && $0.embedding != nil })
         else { return }
 
+        // Matches are suggestions; a person is never assigned automatically.
         Task { [weak self] in
             guard let self else { return }
-            // One clip can't have the same person as two different speakers, whether they're
-            // already named or already suggested as a match.
             var claimed = Set(clip.speakerIds.compactMap { self.voices.voice($0)?.isNamed == true ? $0 : nil })
             var found: [Int: Int] = [:]
             for speaker in unknown {
@@ -513,7 +431,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Rewrites every turn spoken by `from` so it belongs to `to`, in every clip.
     private func repointTurns(from: Int, to: Int) {
         guard from != to else { return }
         var changed = false
@@ -526,12 +443,9 @@ final class AppModel: ObservableObject {
         if changed { persist() }
     }
 
-    /// Drops voice profiles no clip refers to any more (a retry mints a new set).
     private func pruneVoices() {
         voices.prune(keeping: Set(clips.flatMap { $0.turns ?? [] }.map(\.speaker)))
     }
-
-    // MARK: - Timers
 
     private func startTick() {
         stopTick()
@@ -549,9 +463,6 @@ final class AppModel: ObservableObject {
     }
     private func clearErrorToast() { if case .error = widgetState { widgetState = .idle } }
 
-    // MARK: - Playback
-
-    /// Where the playhead sits in a clip, 0…1. Survives pausing and selection changes.
     func progress(for id: UUID) -> Double { progressByClip[id] ?? 0 }
 
     func play(_ clip: Clip) {
@@ -566,15 +477,12 @@ final class AppModel: ObservableObject {
         playingId = clip.id
     }
 
-    /// Moves the playhead, whether or not the clip is currently playing — the scrubber works
-    /// on a stopped clip too.
     func seek(_ clip: Clip, to fraction: Double) {
         let f = max(0, min(1, fraction))
         progressByClip[clip.id] = f
         if playingId == clip.id { player.seek(to: f) }
     }
 
-    /// Clicking a turn while reading seeks to it and plays.
     func playTurn(_ clip: Clip, at seconds: TimeInterval) {
         guard clip.seconds > 0 else { return }
         let f = min(1, max(0, seconds / Double(clip.seconds)))
@@ -586,7 +494,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// The turn the playhead is inside, for the playback highlight. Nil when nothing plays.
     func activeTurnIndex(in clip: Clip) -> Int? {
         guard playingId == clip.id, let turns = clip.turns, clip.seconds > 0 else { return nil }
         let now = progress(for: clip.id) * Double(clip.seconds)
@@ -597,11 +504,6 @@ final class AppModel: ObservableObject {
 
     func togglePlaySelected() { if let c = selectedClip { play(c) } }
 
-    // MARK: - Voices
-
-    /// Names a voice everywhere at once — the **global** profile rename. Called only from
-    /// Settings; a transcript's own rename menu goes through `nameSpeaker` / `reassignSpeaker`
-    /// instead, which fix one recording's attribution without touching any other clip.
     func renameVoice(_ id: Int, to name: String, from clip: Clip?) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, id != Voice.youID else { return }
@@ -613,7 +515,6 @@ final class AppModel: ObservableObject {
 
         let resolved = voices.rename(id, to: trimmed)
         if resolved != id {
-            // Merged into a voice already known by that name — repoint every turn.
             repointTurns(from: id, to: resolved)
         }
 
@@ -631,10 +532,6 @@ final class AppModel: ObservableObject {
         voices.forget(id)
     }
 
-    // MARK: - Vocabulary
-
-    /// Adds a term (trimmed, deduped case-insensitively against what's already there). Silently
-    /// no-ops on an empty or duplicate term; the field clearing on submit is confirmation enough.
     func addTerm(_ raw: String) {
         let term = raw.trimmingCharacters(in: .whitespaces)
         guard !term.isEmpty, !vocabulary.contains(where: { $0.caseInsensitiveCompare(term) == .orderedSame })
@@ -651,9 +548,6 @@ final class AppModel: ObservableObject {
         vocabulary.removeAll { $0 == term }
     }
 
-    /// What actually goes to the transcriber: the typed-in list plus every named voice's name,
-    /// deduped case-insensitively — naming a voice makes it a transcription hint for free,
-    /// with nothing extra to type in twice.
     var effectiveVocabulary: [String] {
         var seen = Set<String>()
         var out: [String] = []
@@ -666,18 +560,12 @@ final class AppModel: ObservableObject {
         return out
     }
 
-    /// Whether `name` matches You's current name (case- and space-insensitive). Naming a
-    /// different voice the same as yourself is refused rather than silently allowed — `You`
-    /// is defined by the microphone track, not by whatever it's called, so nothing can merge
-    /// into it, and two voices both reading “You” in a transcript would be worse than the error.
     private func isYouName(_ name: String) -> Bool {
         let key = name.trimmingCharacters(in: .whitespaces).lowercased()
         guard !key.isEmpty else { return false }
         return (voices.voice(Voice.youID)?.name ?? "").trimmingCharacters(in: .whitespaces).lowercased() == key
     }
 
-    /// Keeps a two-second sample and computes a fingerprint for `voice` from wherever it speaks
-    /// in `clipID`. Shared by the global rename (`renameVoice`) and the per-clip `nameSpeaker`.
     private func captureSampleAndEmbedding(for voice: Int, in clipID: UUID) {
         guard let clip = clips.first(where: { $0.id == clipID }), !clip.audioDeleted else { return }
         if let at = clip.turns?.first(where: { $0.speaker == voice })?.at {
@@ -692,15 +580,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    // MARK: - Per-clip speaker correction
-    //
-    // Fixing a speaker on a transcript touches only that recording — never another clip, and
-    // never the global voice profile beyond what naming any voice always does. That split (and
-    // why it matters) is explained on `applyTranscript` and `recogniseVoices`.
-
-    /// Re-points one clip's turns for `speaker` onto `voice`. If `voice` already speaks
-    /// elsewhere in the same clip, the two speakers' turns merge — one person can't be two
-    /// speakers in one conversation. Every other clip is untouched.
     func reassignSpeaker(_ speaker: Int, in clipID: UUID, to voice: Int) {
         guard speaker != voice,
               let idx = clips.firstIndex(where: { $0.id == clipID }),
@@ -713,10 +592,6 @@ final class AppModel: ObservableObject {
         pruneVoices()
     }
 
-    /// Splits `speaker` off this clip onto a freshly minted voice — “that wasn't them”. Used to
-    /// undo a wrong reassignment (a recogniser suggestion accepted in error, a name that pulled
-    /// in more turns than it should have) without touching any other clip. Returns the new
-    /// voice id, or nil if there was nothing to split.
     @discardableResult
     func detachSpeaker(_ speaker: Int, in clipID: UUID) -> Int? {
         guard let idx = clips.firstIndex(where: { $0.id == clipID }),
@@ -731,9 +606,6 @@ final class AppModel: ObservableObject {
         return fresh
     }
 
-    /// Names this clip's speaker without dragging every other clip that shares the same voice
-    /// along with it — an attribution fix, not a global rename. If the voice already appears in
-    /// another clip, it's detached onto a fresh one first, so only this recording is renamed.
     func nameSpeaker(_ speaker: Int, in clipID: UUID, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, speaker != Voice.youID else { return }
@@ -746,6 +618,7 @@ final class AppModel: ObservableObject {
         let sharedElsewhere = clips.contains { c in
             c.id != clipID && (c.turns ?? []).contains { $0.speaker == speaker }
         }
+        // A transcript correction must not rename this voice in other clips.
         let target = sharedElsewhere ? (detachSpeaker(speaker, in: clipID) ?? speaker) : speaker
 
         let resolved = voices.rename(target, to: trimmed)
@@ -758,34 +631,23 @@ final class AppModel: ObservableObject {
         scheduleToastDismiss()
     }
 
-    // MARK: - Recognizer suggestions
-    //
-    // A suggestion is offered, never applied on its own — see `recogniseVoices`.
-
-    /// Per-clip suggestions not yet acted on: clip id -> local speaker -> the voice it might be.
-    /// In-memory only; a fresh recognition pass runs once per finished transcription anyway.
     @Published var suggestions: [UUID: [Int: Int]] = [:]
 
-    /// Suggestions dismissed with "not them" this session, so the same guess doesn't keep
-    /// reappearing on a clip once you've said no.
     private var rejectedSuggestions: Set<String> = []
 
     private static func suggestionKey(_ clipID: UUID, _ speaker: Int) -> String { "\(clipID):\(speaker)" }
 
-    /// Confirms a suggestion: reassigns the speaker and clears the chip.
     func acceptSuggestion(for speaker: Int, in clipID: UUID) {
         guard let voice = suggestions[clipID]?[speaker] else { return }
         reassignSpeaker(speaker, in: clipID, to: voice)
         suggestions[clipID]?[speaker] = nil
     }
 
-    /// Dismisses a suggestion without acting on it.
     func rejectSuggestion(for speaker: Int, in clipID: UUID) {
         rejectedSuggestions.insert(Self.suggestionKey(clipID, speaker))
         suggestions[clipID]?[speaker] = nil
     }
 
-    /// Plays a named voice's two-second sample in Settings. Inert on an unnamed voice.
     func toggleVoiceSample(_ id: Int) {
         if playingVoiceId == id { samplePlayer.stop(); playingVoiceId = nil; return }
         guard let url = voices.sampleURL(for: id) else { return }
@@ -793,12 +655,9 @@ final class AppModel: ObservableObject {
         playingVoiceId = id
     }
 
-    // MARK: - Clip actions
-
     var selectedClip: Clip? { clips.first(where: { $0.id == selectedId }) }
     var todayClips: [Clip] { clips.filter { $0.isToday } }
 
-    /// The Library list under the current filter chip.
     var filteredClips: [Clip] {
         let query = librarySearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return clips.filter { clip in
@@ -810,8 +669,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Switching filters keeps the selected clip when it survives the change, otherwise takes
-    /// the first one, and always leaves edit mode.
     func setFilter(_ filter: LibraryFilter) {
         guard filter != libraryFilter else { return }
         libraryFilter = filter
@@ -821,8 +678,6 @@ final class AppModel: ObservableObject {
         selectedId = list.first?.id
     }
 
-    /// Keep the editor's selection inside the visible search results. Clearing a search
-    /// restores the first available clip when the previous selection was filtered out.
     func setLibrarySearch(_ query: String) {
         librarySearch = query
         let list = filteredClips
@@ -833,7 +688,6 @@ final class AppModel: ObservableObject {
 
     func openClip(_ id: UUID) { selectedId = id; editingTranscript = false; tab = .library }
 
-    /// A title belongs to this meeting alone; clearing it restores the transcript preview.
     func renameMeeting(_ id: UUID, to name: String) {
         guard let idx = clips.firstIndex(where: { $0.id == id }),
               clips[idx].isConversation else { return }
@@ -848,9 +702,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// One Copy button, no variants: a meeting copies as labelled blocks, a note copies bare.
-    /// Confirmation is the calling button's own state, not a toast — see `EditorPane.copyTapped`
-    /// and `ClipRowView.copyTapped`.
     func copy(_ clip: Clip) {
         TextInserter.copyToClipboard(clip.copyText(voices: voices.voices))
     }
@@ -860,17 +711,12 @@ final class AppModel: ObservableObject {
         copy(c)
     }
 
-    /// Confirmation is the Save changes button's own state, not a toast — see
-    /// `EditorPane.saveTapped`.
     func saveEdit(_ text: String, for clipID: UUID) {
         guard let idx = clips.firstIndex(where: { $0.id == clipID }) else { return }
         clips[idx].text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         persist()
     }
 
-    /// Commits edited conversation turns. Speaker and timestamp are untouched — they belong to
-    /// the audio — so only the text of each turn comes back. Confirmation is the Done editing
-    /// button's own label change, not a toast.
     func saveTurns(_ texts: [String], for clipID: UUID) {
         guard let idx = clips.firstIndex(where: { $0.id == clipID }),
               var turns = clips[idx].turns else { return }
@@ -898,9 +744,7 @@ final class AppModel: ObservableObject {
         scheduleToastDismiss()
     }
 
-    // MARK: - Onboarding
-
-    static let onboardingLastStep = 3   // four steps: 0…3
+    static let onboardingLastStep = 3
 
     func onboardingNext() {
         if onboardingStep >= Self.onboardingLastStep {
@@ -910,7 +754,7 @@ final class AppModel: ObservableObject {
         }
     }
     func onboardingBack() {
-        if onboardingStep == 0 { finishOnboarding() }   // "Skip all this"
+        if onboardingStep == 0 { finishOnboarding() }
         else { onboardingStep -= 1 }
     }
     private func finishOnboarding() {
@@ -920,30 +764,24 @@ final class AppModel: ObservableObject {
     }
     func replayOnboarding() { onboardingStep = 0; showingOnboarding = true }
 
-    // MARK: - Retention sweep
-
     func sweepRetention() {
-        guard let days = retention.days else { return }   // Forever: never sweep
+        guard let days = retention.days else { return }
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         var changed = false
         for i in clips.indices where !clips[i].audioDeleted && clips[i].createdAt < cutoff {
             Persistence.shared.deleteAudio(fileName: clips[i].audioFileName)
-            clips[i].audioDeleted = true      // transcript stays
+            clips[i].audioDeleted = true
             changed = true
         }
         if changed { persist() }
     }
 
-    // MARK: - Derived values for the UI
-
-    /// The macOS account's first name — the default greeting name.
     var systemFirstName: String {
         let full = NSFullUserName().trimmingCharacters(in: .whitespaces)
         let first = full.split(separator: " ").first.map(String.init) ?? full
         return first.isEmpty ? NSUserName() : first
     }
 
-    /// What the greeting calls you: your chosen name, else the macOS account first name.
     var userFirstName: String {
         let chosen = displayName.trimmingCharacters(in: .whitespaces)
         return chosen.isEmpty ? systemFirstName : chosen
@@ -957,17 +795,11 @@ final class AppModel: ObservableObject {
     var subline: String { "\(todayClips.count) recordings today." }
 
     var totalMB: Double { Double(Persistence.shared.totalAudioBytes()) / 1_000_000 }
-    var storageFraction: Double { min(1.0, totalMB / 12) }   // 12 MB meter, per the reference
+    var storageFraction: Double { min(1.0, totalMB / 12) }
     var storageLabel: String { String(format: "%.1f MB · %d clips", totalMB, clips.count) }
 
-    // MARK: Dynamic insights (all derived from real clips)
-
-    /// Words dictated today = sum of word counts across today's clips. Updates live as you
-    /// dictate, edit, or delete.
     var wordsToday: Int { todayClips.reduce(0) { $0 + $1.wordCount } }
 
-    /// Minutes of typing avoided today, at an assumed typing speed. (Speaking rate `wpm`
-    /// is shown in the captions.)
     let assumedTypingWPM = 41
     var minutesSaved: String { "\(Int((Double(wordsToday) / Double(assumedTypingWPM)).rounded())) min" }
 
@@ -976,21 +808,18 @@ final class AppModel: ObservableObject {
         return f.string(from: NSNumber(value: wordsToday)) ?? "\(wordsToday)"
     }
 
-    /// One day of the Receipts chart: the bar's height, and the detail behind it on hover.
     struct DayWords: Identifiable {
         let id = UUID()
         let label: String
         let words: Int
         let recordings: Int
         let meetings: Int
-        let longest: Int          // seconds of the day's longest single take
+        let longest: Int
 
-        /// `{n} min of typing avoided`, at the assumed typing speed.
         func minutesSaved(typingWPM: Int) -> Int {
             Int((Double(words) / Double(typingWPM)).rounded())
         }
 
-        /// `6 recordings` — with ` · 2 meetings` appended only when the day had any.
         var recordingsLine: String {
             let base = "\(recordings) recording\(recordings == 1 ? "" : "s")"
             return meetings > 0 ? base + " · \(meetings) meeting\(meetings == 1 ? "" : "s")" : base
@@ -999,10 +828,9 @@ final class AppModel: ObservableObject {
         var longestLine: String { "Longest \(Clip.formatSeconds(longest))" }
     }
 
-    /// The last 7 days (oldest → today).
     var weekWords: [DayWords] {
         let cal = Calendar.current
-        let fmt = DateFormatter(); fmt.dateFormat = "EEE"   // Mon, Tue, …
+        let fmt = DateFormatter(); fmt.dateFormat = "EEE"
         let today = cal.startOfDay(for: Date())
         return (0..<7).reversed().map { back in
             let day = cal.date(byAdding: .day, value: -back, to: today)!
@@ -1017,10 +845,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Exposed so the Receipts panel can show the same "typing avoided" figure as Today.
     var typingWPM: Int { assumedTypingWPM }
 
-    /// Caption for the "Saved today" card — the loudest day this week, from real data.
     var weekCaption: String {
         let week = weekWords
         guard let peak = week.max(by: { $0.words < $1.words }), peak.words > 0 else {
@@ -1032,7 +858,6 @@ final class AppModel: ObservableObject {
         return "\(dayName(peak.label)) is your loudest day so far."
     }
 
-    /// Caption for the Receipts "Words per day" card — your longest single recording.
     var longestCaption: String {
         guard let longest = clips.max(by: { $0.seconds < $1.seconds }) else {
             return "No recordings yet — click the widget and talk."

@@ -1,12 +1,7 @@
 import SwiftUI
 
-/// Renders a bundled Solar (Iconify) icon as a tintable template image.
-///
-/// Icons are fetched into the asset catalog by `scripts/fetch-assets.sh` as
-/// `solar-<name>` imagesets. If an icon hasn't been fetched yet, this falls back to the
-/// nearest SF Symbol so the UI still renders in Xcode previews.
 struct SolarIcon: View {
-    let name: String              // Solar name without the "solar:" prefix, e.g. "microphone-3-bold"
+    let name: String
     var size: CGFloat = 18
     var color: Color = Theme.ink
 
@@ -31,7 +26,6 @@ struct SolarIcon: View {
 
     private var assetName: String { "solar-\(name)" }
 
-    /// SF Symbol stand-ins used only when the Solar asset is missing.
     private static let sfFallback: [String: String] = [
         Solar.mic: "mic.fill",
         Solar.today: "waveform",
@@ -62,8 +56,6 @@ struct SolarIcon: View {
     ]
 }
 
-/// Canonical Solar icon names used across the app (from the spec's icon table, plus the
-/// two added for the widget error states and the Settings key card).
 enum Solar {
     static let mic         = "microphone-3-bold"
     static let today       = "soundwave-bold-duotone"
@@ -86,9 +78,9 @@ enum Solar {
     static let stopwatch   = "stopwatch-bold-duotone"
     static let stop        = "stop-bold"
     static let textSquare  = "text-square-bold"
-    static let danger      = "danger-triangle-bold" // widget error states (added)
-    static let key         = "key-bold-duotone"      // Settings transcription card (added)
-    static let speakers    = "users-group-rounded-bold-duotone" // meetings: rows, Settings card
-    static let pen         = "pen-bold-duotone"      // rename a voice
-    static let info        = "info-circle-bold-duotone" // "Where your audio goes"
+    static let danger      = "danger-triangle-bold"
+    static let key         = "key-bold-duotone"
+    static let speakers    = "users-group-rounded-bold-duotone"
+    static let pen         = "pen-bold-duotone"
+    static let info        = "info-circle-bold-duotone"
 }

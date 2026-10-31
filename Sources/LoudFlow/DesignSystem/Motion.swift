@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// A small motion vocabulary shared by the window. The floating widget keeps its own
-/// spring because its panel frame and SwiftUI content must move together.
 enum Motion {
     static let hover = Animation.easeOut(duration: 0.12)
     static let feedback = Animation.easeOut(duration: 0.16)

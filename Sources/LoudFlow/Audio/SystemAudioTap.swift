@@ -4,22 +4,6 @@ import CoreAudio
 import AudioToolbox
 import OSLog
 
-/// Records what the Mac is playing — the other side of a call — to its own file.
-///
-/// This is the second half of two-track capture. Keeping system audio separate from the
-/// microphone is what makes speaker 0 **you** rather than a guess: diarization never has to
-/// decide which voice is yours, only how to split the remote side.
-///
-/// It uses a **Core Audio process tap** rather than ScreenCaptureKit. Both can reach system
-/// audio, but ScreenCaptureKit is screen-recording-shaped: it asks for the Screen Recording
-/// permission, lights the capture indicator in the menu bar, and gets periodically re-consented.
-/// A process tap is the dedicated audio-only route — it asks once, using
-/// `NSAudioCaptureUsageDescription`, and never claims to look at the screen. For an app that
-/// records voices and nothing else, that is the honest permission to ask for.
-///
-/// The tap excludes LoudFlow's own process, so the earcons never land in a transcript. If the
-/// permission is refused — or nothing was playing — recording quietly continues with the
-/// microphone alone; a note is still a note.
 @available(macOS 14.2, *)
 final class SystemAudioTap {
 
@@ -29,8 +13,6 @@ final class SystemAudioTap {
     private var file: AVAudioFile?
     private let lock = NSLock()
 
-    /// Peak amplitude seen so far. Used to decide whether the track is worth keeping — a silent
-    /// second channel would only give diarization something to hallucinate about.
     private var peakValue: Float = 0
     var capturedAnything: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -39,27 +21,21 @@ final class SystemAudioTap {
 
     private static let log = Logger(subsystem: "com.loudflow.app", category: "SystemAudioTap")
 
-    // MARK: - Start
-
-    /// Starts capture into `url`. Returns false when the permission isn't granted, or when the
-    /// tap can't be built for any other reason — every failure here is survivable.
     func start(to url: URL) -> Bool {
         do {
             let outputDevice = try Self.defaultOutputDevice()
             let outputUID = try Self.deviceUID(outputDevice)
             let ourProcess = try? Self.processObject(for: getpid())
 
-            // A global tap of everything the Mac is playing, minus ourselves.
             let description = CATapDescription(
                 stereoGlobalTapButExcludeProcesses: ourProcess.map { [$0] } ?? []
             )
             description.uuid = UUID()
             description.name = "LoudFlow system audio"
-            description.isPrivate = true          // never shows up as a device to other apps
-            description.muteBehavior = CATapMuteBehavior.unmuted  // you still hear the call
+            description.isPrivate = true
+            description.muteBehavior = CATapMuteBehavior.unmuted
 
             var tap = AudioObjectID(kAudioObjectUnknown)
-            // This is the call that triggers the audio-capture permission prompt on first use.
             guard AudioHardwareCreateProcessTap(description, &tap) == noErr,
                   tap != AudioObjectID(kAudioObjectUnknown)
             else { return false }
@@ -68,7 +44,6 @@ final class SystemAudioTap {
             let format = try Self.tapFormat(tap)
             guard let avFormat = Self.audioFormat(from: format) else { throw TapError.badFormat }
 
-            // The tap has to ride on an aggregate device to be read from.
             let aggregate: [String: Any] = [
                 kAudioAggregateDeviceNameKey: "LoudFlow Capture",
                 kAudioAggregateDeviceUIDKey: UUID().uuidString,
@@ -107,8 +82,6 @@ final class SystemAudioTap {
         }
     }
 
-    // MARK: - Capture
-
     private func receive(_ input: UnsafePointer<AudioBufferList>, format: AVAudioFormat) {
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input) else { return }
 
@@ -122,8 +95,6 @@ final class SystemAudioTap {
             try? f?.write(from: buffer)
         }
     }
-
-    // MARK: - Stop
 
     func stop() {
         teardown()
@@ -144,11 +115,9 @@ final class SystemAudioTap {
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
         lock.lock()
-        file = nil          // flushes the writer
+        file = nil
         lock.unlock()
     }
-
-    // MARK: - Core Audio lookups
 
     private enum TapError: Error {
         case noDefaultOutput, noDeviceUID, badFormat, noAggregateDevice, noIOProc, couldNotStart
@@ -182,7 +151,6 @@ final class SystemAudioTap {
         return uid as String
     }
 
-    /// Our own audio process object, so the tap can leave LoudFlow's output out of the mix.
     private static func processObject(for pid: pid_t) throws -> AudioObjectID {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,

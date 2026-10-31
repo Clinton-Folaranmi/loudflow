@@ -1,11 +1,5 @@
 import Foundation
 
-/// Local, on-disk storage: `~/Library/Application Support/LoudFlow/`
-///   • `clips.json`   — the transcript index (Codable `[Clip]`)
-///   • `audio/*.m4a`  — the recordings
-///
-/// Nothing here is uploaded. (Transcription uploads a copy of the audio to the provider at
-/// record time; that is handled in `Transcription/`, not here.)
 final class Persistence {
     static let shared = Persistence()
 
@@ -23,8 +17,6 @@ final class Persistence {
         try? FileManager.default.createDirectory(at: audioURL, withIntermediateDirectories: true)
     }
 
-    // MARK: Clip index
-
     func loadClips() -> [Clip] {
         guard let data = try? Data(contentsOf: indexURL) else { return [] }
         let decoder = JSONDecoder()
@@ -39,8 +31,6 @@ final class Persistence {
         guard let data = try? encoder.encode(clips) else { return }
         try? data.write(to: indexURL, options: .atomic)
     }
-
-    // MARK: Audio files
 
     func newAudioURL() -> (url: URL, fileName: String) {
         let name = "\(UUID().uuidString).m4a"
@@ -60,7 +50,6 @@ final class Persistence {
         return (attrs?[.size] as? Int64) ?? 0
     }
 
-    /// Total bytes of stored audio (for the disk meter).
     func totalAudioBytes() -> Int64 {
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: audioURL, includingPropertiesForKeys: [.fileSizeKey]) else { return 0 }

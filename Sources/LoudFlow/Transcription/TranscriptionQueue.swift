@@ -1,9 +1,6 @@
 import Foundation
 import Network
 
-/// Tracks clips that couldn't be transcribed yet (offline / transient failure) and fires
-/// `onNetworkRestored` when connectivity comes back, so `AppModel` can retry them. Keeping
-/// the recording and queuing it is required by the spec — never fail silently.
 final class TranscriptionQueue {
     var onNetworkRestored: (() -> Void)?
 

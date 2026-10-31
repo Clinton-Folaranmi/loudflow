@@ -5,7 +5,6 @@ struct TodayView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            // Header
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.greeting).textStyle(.greeting).foregroundColor(Theme.ink)
                 Text(model.subline).textStyle(.subtitle).foregroundColor(Theme.body)
@@ -79,7 +78,6 @@ struct TodayView: View {
         .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Theme.ink))
     }
 
-    // Real per-day word counts for the last 7 days; the loudest day is the marigold peak.
     private var weekBars: [ChartBar] {
         let week = model.weekWords
         let maxWords = max(1, week.map(\.words).max() ?? 1)

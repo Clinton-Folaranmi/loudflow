@@ -2,13 +2,6 @@ import Foundation
 import CoreGraphics
 import QuartzCore
 
-/// Global trigger hotkeys via a `CGEventTap`:
-///   • **hold** — ⌥Space keydown starts, keyup (or releasing Option) stops. Auto-repeat is
-///     guarded, and the Space is consumed so it isn't typed into the frontmost app.
-///   • **double** — double-tap either Control key toggles recording.
-///
-/// Requires Accessibility permission (the tap can't be created without it). "click" mode
-/// installs no tap at all.
 final class HotkeyManager {
     var onHoldStart: (() -> Void)?
     var onHoldStop: (() -> Void)?
@@ -28,9 +21,6 @@ final class HotkeyManager {
         if mode == .click { teardown() } else { ensureTap() }
     }
 
-    /// Called only when the user explicitly picks a hold/double trigger: prompt for
-    /// Accessibility + Input Monitoring (both can be needed for a keyboard event tap), then
-    /// install. This is the ONLY place that prompts.
     func requestPermissionAndInstall() {
         Permissions.requestAccessibility()
         Permissions.requestInputMonitoring()
@@ -39,12 +29,8 @@ final class HotkeyManager {
 
     func stop() { teardown() }
 
-    // MARK: Tap lifecycle
-
     private func ensureTap() {
         guard eventTap == nil, mode != .click else { return }
-        // Only install once trust is granted; otherwise poll until it is, so the hotkey starts
-        // working right after the user flips the toggle in System Settings — no relaunch needed.
         guard Permissions.hasAccessibility() else { startRetry(); return }
 
         let mask = (1 << CGEventType.keyDown.rawValue)
@@ -58,7 +44,7 @@ final class HotkeyManager {
             eventsOfInterest: CGEventMask(mask),
             callback: hotkeyTapCallback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else { startRetry(); return }   // e.g. Input Monitoring not yet granted
+        ) else { startRetry(); return }
 
         eventTap = tap
         let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
@@ -68,7 +54,6 @@ final class HotkeyManager {
         stopRetry()
     }
 
-    /// Retry installing the tap every 1.5s until it succeeds (permission granted mid-session).
     private func startRetry() {
         guard retryTimer == nil else { return }
         retryTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
@@ -91,8 +76,6 @@ final class HotkeyManager {
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
     }
 
-    // MARK: Event handling (returns true to consume the event)
-
     fileprivate func handle(type: CGEventType, event: CGEvent) -> Bool {
         switch mode {
         case .hold:   return handleHold(type: type, event: event)
@@ -108,7 +91,7 @@ final class HotkeyManager {
 
         if type == .keyDown, keycode == space, optionDown {
             if !isHolding { isHolding = true; DispatchQueue.main.async { self.onHoldStart?() } }
-            return true // swallow the space
+            return true
         }
         if type == .keyUp, keycode == space, isHolding {
             isHolding = false
@@ -125,8 +108,8 @@ final class HotkeyManager {
     private func handleDouble(type: CGEventType, event: CGEvent) {
         guard type == .flagsChanged else { return }
         let keycode = event.getIntegerValueField(.keyboardEventKeycode)
-        let controlKeys: Set<Int64> = [59, 62] // left / right Control
-        guard controlKeys.contains(keycode), event.flags.contains(.maskControl) else { return } // press only
+        let controlKeys: Set<Int64> = [59, 62]
+        guard controlKeys.contains(keycode), event.flags.contains(.maskControl) else { return }
         let now = CACurrentMediaTime()
         if now - lastControlTap < 0.35 {
             lastControlTap = 0
@@ -137,8 +120,6 @@ final class HotkeyManager {
     }
 }
 
-/// C callback for the event tap. Recovers the manager from `refcon` and asks it to handle the
-/// event; re-enables the tap if the system disabled it.
 private func hotkeyTapCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,

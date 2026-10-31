@@ -1,9 +1,6 @@
 import Foundation
 import AVFoundation
 
-/// Live microphone level (0…1) for the onboarding mic test — so the bars actually react to
-/// your voice instead of playing a canned animation. Records to a throwaway temp file purely
-/// to read metering; nothing is kept.
 final class MicMeter: ObservableObject {
     @Published var level: Double = 0
 
@@ -27,8 +24,8 @@ final class MicMeter: ObservableObject {
             self.timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
                 guard let self, let r = self.recorder else { return }
                 r.updateMeters()
-                let db = r.averagePower(forChannel: 0)          // roughly -60…0 dB
-                let norm = max(0, min(1, Double(db + 55) / 55))  // → 0…1
+                let db = r.averagePower(forChannel: 0)
+                let norm = max(0, min(1, Double(db + 55) / 55))
                 self.level = norm
             }
         }

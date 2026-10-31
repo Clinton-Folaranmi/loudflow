@@ -1,44 +1,21 @@
 import SwiftUI
 
-/// The floating widget: **one pill that morphs**, not five pills that swap.
-///
-/// Background and padding animate over 0.22s, the leading dot animates its fill and its size,
-/// and only the labels change. Nothing translates vertically — `fRise` (a vertical rise) is the
-/// onboarding modal's entrance, not this view's; the toast beside the pill slides in
-/// horizontally instead (`fSlideIn`), from behind the pill outward.
-///
-/// Everything anchors to the screen edge it lives near (`anchorRight`) so content unfurls
-/// *inward*. Drag (past a small threshold) moves it; a plain tap records.
 struct WidgetView: View {
     @ObservedObject var model: AppModel
     var anchorRight: Bool = true
-    /// Called when something that can change how big the pill is has changed. The panel
-    /// re-measures in response and animates its own frame to match — see the note on
-    /// `WidgetPanelController` for why this is a signal, not a size the view reports itself.
     var onLayoutChanged: (() -> Void)? = nil
     var onDragChanged: ((CGSize) -> Void)? = nil
     var onDragEnded: (() -> Void)? = nil
 
-    private let shadowPad: CGFloat = 14   // transparent margin so the shadow never clips
+    private let shadowPad: CGFloat = 14
 
     @State private var moved = false
     @State private var dragging = false
     @State private var hovering = false
-    /// Cancels a pending hover-off so a boundary flicker (mouse sitting right at the pill's
-    /// edge while it grows/shrinks under it) doesn't read as a rapid expand/collapse "shake" —
-    /// see `setHovering`.
     @State private var hoverOffTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // Anchored right: the pill stays put on the right and the toast unfurls to its left.
-        // Anchored left: the reverse. Either way the newest content grows inward, away from the
-        // screen edge, the same direction the pill itself grows in.
-        //
-        // The `if let toast` has to sit directly in this builder, not behind a named `some
-        // View` binding (a `Group` included that way) — only a conditional the builder can see
-        // is omitted from the stack's spacing when there's no toast; a stand-in view, even an
-        // empty one, still claims its 8pt gap.
         HStack(alignment: .center, spacing: 8) {
             if anchorRight {
                 if let toast = model.toast {
@@ -55,11 +32,6 @@ struct WidgetView: View {
         .padding(shadowPad)
         .fixedSize()
         .animation(reduceMotion ? nil : Motion.feedback, value: model.toast)
-        // Everything that can change how big the pill is. A `GeometryReader` background used to
-        // report the live size here, but that only works while `NSHostingView` is the window's
-        // own contentView — nested one level down (required to avoid the resize crash below),
-        // it silently stops firing past the first layout. Explicit signals on the state that
-        // actually drives size are what's left that's reliable.
         .onChange(of: hovering) { _ in onLayoutChanged?() }
         .onChange(of: model.widgetState) { _ in onLayoutChanged?() }
         .onChange(of: model.toast) { _ in onLayoutChanged?() }
@@ -67,7 +39,6 @@ struct WidgetView: View {
         .onChange(of: model.elapsed) { _ in onLayoutChanged?() }
     }
 
-    // Drag moves the widget; buttons/taps still fire because the drag needs >6pt of movement.
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 6)
             .onChanged { g in
@@ -80,8 +51,6 @@ struct WidgetView: View {
                 if moved { moved = false; onDragEnded?() }
             }
     }
-
-    // MARK: - The one pill
 
     private var state: WidgetState { model.widgetState }
 
@@ -103,15 +72,11 @@ struct WidgetView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { if tapDoesSomething { tapped() } }
         .clickable(if: tapDoesSomething)
-        // One spring owns the pill's geometry and contents. Independent property animations
-        // made its label, padding and dot appear to finish at different times.
         .animation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.88), value: state)
         .animation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.88), value: paddingKey)
         .animation(reduceMotion ? nil : .spring(response: 0.30, dampingFraction: 0.88), value: pillBackground)
     }
 
-    /// Whether `tapped()` currently does anything — the pill is inert while transcribing or
-    /// queued, and while idle with the hold trigger (the key does that one, not a click).
     private var tapDoesSomething: Bool {
         switch state {
         case .idle:            return model.trigger != .hold
@@ -120,16 +85,13 @@ struct WidgetView: View {
         }
     }
 
-    /// The pill grows on hover, which moves its own edge out from under a mouse sitting right
-    /// on it — the resulting exit/re-entry reads as the expanded state rapidly flickering
-    /// on and off ("shaking"). Entering is instant; leaving waits a beat so a boundary flicker
-    /// can cancel it before it's ever seen.
     private func setHovering(_ isHovering: Bool) {
         guard !dragging else { return }
         hoverOffTask?.cancel()
         if isHovering {
             hovering = true
         } else {
+            // Delaying hover-off prevents the expanding pill from flickering under the pointer.
             hoverOffTask = Task {
                 try? await Task.sleep(nanoseconds: 120_000_000)
                 guard !Task.isCancelled else { return }
@@ -138,8 +100,6 @@ struct WidgetView: View {
         }
     }
 
-    /// Idle starts (unless the trigger is hold — then the key does it), recording stops, an
-    /// error opens Settings. Everything else is inert.
     private func tapped() {
         switch state {
         case .idle:       if model.trigger != .hold { model.toggleRecording() }
@@ -161,7 +121,6 @@ struct WidgetView: View {
                     .fixedSize()
             ))
         }
-        // The keycap is an idle-only hint, and only when there is a key to press.
         if case .idle = state, hovering, model.trigger != .click {
             items.append(AnyView(Keycap(text: model.trigger.combo, fontSize: 11, hPad: 8, vPad: 3)))
         }
@@ -170,7 +129,6 @@ struct WidgetView: View {
                 Text(failure.action).font(Typo.font(12, 800)).foregroundColor(Theme.marigold)
             ))
         }
-        // Discard is only ever offered while something is being recorded.
         if case .recording = state {
             items.append(AnyView(cancelButton))
         }
@@ -203,8 +161,6 @@ struct WidgetView: View {
         .help("Discard — don't save or transcribe")
     }
 
-    // MARK: Per-state values
-
     private var pillBackground: Color {
         switch state {
         case .idle, .transcribing: return Theme.card
@@ -225,7 +181,6 @@ struct WidgetView: View {
         }
     }
 
-    /// `EdgeInsets` isn't `Equatable`, so animate on a stand-in that is.
     private var paddingKey: String {
         "\(padding.top)-\(padding.leading)"
     }
@@ -279,7 +234,6 @@ struct WidgetView: View {
         }
     }
 
-    /// Idle says nothing until you hover it; every other state has something to report.
     private var showsLabel: Bool {
         if case .idle = state { return hovering }
         return true
@@ -310,21 +264,18 @@ struct WidgetView: View {
         }
     }
 
-    // MARK: Toast
-
     private func toastView(_ toast: Toast) -> some View {
         Text(toast.message)
             .font(Typo.font(12, 700))
             .foregroundColor(Theme.inkOnDark)
+            .frame(maxWidth: 360)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 12).padding(.vertical, 8)
             .background(Capsule().fill(Theme.ink))
             .shadow(color: Color(hex: 0x2A3129, alpha: 0.18), radius: 9, x: 0, y: 4)
-            .fixedSize()
     }
 }
 
-/// `fPulse` applied only in the states that call for it. Keyed on the duration so the animation
-/// restarts cleanly when the widget morphs from recording into transcribing.
 private struct DotPulse: ViewModifier {
     let duration: Double?
 

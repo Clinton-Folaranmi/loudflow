@@ -18,13 +18,11 @@ struct SettingsView: View {
             triggerGrid
             toggleCard
             retentionCard
-            speakersCard              // voice profiles — no toggle, this is how recording works
-            vocabularyCard            // decoding hints sent alongside the audio
-            transcriptionCard         // the API key lives here (and in onboarding)
+            speakersCard
+            vocabularyCard
+            transcriptionCard
         }
     }
-
-    // MARK: Name
 
     private var nameCard: some View {
         HStack(spacing: 12) {
@@ -46,8 +44,6 @@ struct SettingsView: View {
         .themeShadow(Theme.Shadow.card)
     }
 
-    // MARK: Trigger cards
-
     private var triggerGrid: some View {
         HStack(spacing: 14) {
             ForEach(TriggerMode.allCases, id: \.self) { t in
@@ -57,13 +53,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: Toggles
-
-    /// Two switches, written out rather than generated — these are labels, not data.
-    ///
-    /// There is no `Add punctuation` here any more: punctuation, paragraph breaks, and readable
-    /// numbers come from the ASR model itself, so there is nothing to opt out of. And there is
-    /// no sounds switch: the three earcons are simply on.
     private struct OptionRow { let title: String; let keyPath: WritableKeyPath<DictationOptions, Bool> }
     private let optionRows: [OptionRow] = [
         .init(title: "Type it into whatever field I'm in", keyPath: \.insert),
@@ -97,8 +86,6 @@ struct SettingsView: View {
         .themeShadow(Theme.Shadow.card)
     }
 
-    // MARK: Retention
-
     private var retentionCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 9) {
@@ -120,10 +107,6 @@ struct SettingsView: View {
         .background(RoundedRectangle(cornerRadius: Theme.Radius.cardSmall).fill(Theme.cream))
     }
 
-    // MARK: Speakers
-
-    /// No toggle. Two-track capture is how the app records, not a preference — so this card
-    /// only explains what happens and lists the voices it has met.
     private var speakersCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 9) {
@@ -136,8 +119,6 @@ struct SettingsView: View {
                 .lineSpacing(12.5 * 0.45)
                 .fixedSize(horizontal: false, vertical: true)
 
-            // Recognition runs on this Mac, but the model has to arrive from somewhere once.
-            // The app says so rather than quietly reaching for the network.
             if let note = recognizerNote {
                 Text(note)
                     .font(Typo.font(12, 400))
@@ -160,7 +141,6 @@ struct SettingsView: View {
 
     @State private var renamingVoice: Int?
 
-    /// What the Speakers card says about the on-device recogniser, if anything.
     private var recognizerNote: String? {
         switch model.recognizer.readiness {
         case .preparing:
@@ -172,12 +152,6 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: Vocabulary
-
-    /// Names, jargon and spellings the transcriber tends to get wrong, sent along as a
-    /// decoding hint (see `Transcriber.transcribe(_:twoTrack:vocabulary:)`). A voice you've
-    /// named is included automatically — see `AppModel.effectiveVocabulary` — so this list is
-    /// only for what naming a voice doesn't already cover.
     private var vocabularyCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 9) {
@@ -203,15 +177,11 @@ struct SettingsView: View {
         .background(RoundedRectangle(cornerRadius: Theme.Radius.cardSmall).fill(Theme.cream))
     }
 
-    // MARK: Transcription
-
     private var transcriptionCard: some View { TranscriptionCard(model: model) }
 }
 
 // MARK: - Vocabulary pills
 
-/// One stored term: label + remove, mirroring `VoicePill`'s shape without the play/rename
-/// affordances a plain word doesn't need.
 private struct TermPill: View {
     let term: String
     let remove: () -> Void
@@ -244,8 +214,6 @@ private struct TermPill: View {
     }
 }
 
-/// The always-open "type to add" field at the end of the term list. Stays focused after a
-/// submit, so adding several terms in a row is just type-Return-type-Return.
 private struct AddTermField: View {
     let add: (String) -> Void
     @State private var draft = ""
@@ -275,7 +243,6 @@ private struct AddTermField: View {
 
 // MARK: - Voice pill
 
-/// A voice as a pill, not a full-width row: **play · name · pen · Forget**.
 private struct VoicePill: View {
     @ObservedObject var model: AppModel
     let voice: Voice
@@ -290,7 +257,6 @@ private struct VoicePill: View {
 
     private var isRenaming: Bool { renaming == voice.id }
     private var isPlaying: Bool { model.playingVoiceId == voice.id }
-    /// A sample is only kept once a voice has been named, so there is nothing to hear before.
     private var canPlay: Bool { voice.isNamed && model.voices.sampleURL(for: voice.id) != nil }
 
     var body: some View {
@@ -305,8 +271,6 @@ private struct VoicePill: View {
                     .foregroundColor(voice.isNamed ? Theme.creamInk : Theme.creamMuted)
                     .padding(.horizontal, 2)
 
-                // You can be renamed (it changes the greeting too — see `AppModel.displayName`)
-                // but never forgotten; every other voice gets both once it's named.
                 penButton
                 if !voice.isYou && voice.isNamed {
                     if confirmingForget {
@@ -340,7 +304,6 @@ private struct VoicePill: View {
         .onExitCommand { confirmingForget = false }
     }
 
-    /// Plays the voice's stored two seconds, so you can confirm the match.
     private var playButton: some View {
         Button { model.toggleVoiceSample(voice.id) } label: {
             ZStack {
@@ -393,10 +356,7 @@ private struct VoicePill: View {
             .onSubmit {
                 let name = draft.trimmingCharacters(in: .whitespaces)
                 renaming = nil
-                guard !name.isEmpty else { return }        // empty keeps the old name
-                // You's name is `displayName`, mirrored onto the voice — see the didSet on
-                // `AppModel.displayName` — rather than the per-voice rename path everyone
-                // else uses.
+                guard !name.isEmpty else { return }
                 if voice.isYou {
                     model.displayName = name
                 } else {
@@ -408,8 +368,6 @@ private struct VoicePill: View {
     }
 }
 
-/// Wraps its children onto as many rows as they need. Voice pills are all different widths, so
-/// a fixed grid would either clip a long name or leave gaps after a short one.
 private struct FlowLayout: Layout {
     var spacing: CGFloat = 7
 
@@ -417,9 +375,8 @@ private struct FlowLayout: Layout {
         let offered = proposal.width ?? .infinity
         let rows = layout(subviews, in: offered)
         let height = rows.last.map { $0.y + $0.height } ?? 0
-        // Never hand back an infinite width — an unbounded proposal has to resolve to the
-        // widest row, or AppKit ends up laying out a view with no finite frame.
         let natural = rows.map(\.width).max() ?? 0
+        // SwiftUI can propose an unbounded width; report the content width in that case.
         return CGSize(width: offered.isFinite ? offered : natural, height: height)
     }
 

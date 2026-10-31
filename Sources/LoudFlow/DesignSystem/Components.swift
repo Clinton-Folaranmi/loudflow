@@ -2,9 +2,6 @@ import SwiftUI
 
 // MARK: - Waveform (fBar)
 
-/// Staggered waveform bars. Matches the `fBar` keyframe: scaleY 0.16 ↔ 1 over 0.72s
-/// ease-in-out infinite, each bar delayed by `stagger`. Purely decorative — the spec is
-/// explicit that no live levels/words are shown while recording.
 struct WaveBars: View {
     var count: Int = 8
     var totalWidth: CGFloat? = 74
@@ -39,8 +36,6 @@ struct WaveBars: View {
     }
 }
 
-/// Bars driven by a live 0…1 level (the onboarding mic test). Center bars react most, so it
-/// reads like a real meter responding to your voice.
 struct LiveWaveBars: View {
     var level: Double
     var count: Int = 12
@@ -66,15 +61,14 @@ struct LiveWaveBars: View {
 
     private func barScale(_ i: Int) -> CGFloat {
         let mid = Double(count - 1) / 2
-        let dist = abs(Double(i) - mid) / mid          // 0 at center → 1 at edges
-        let weight = 1.5 * (1 - dist * 0.6)            // center bars taller
+        let dist = abs(Double(i) - mid) / mid
+        let weight = 1.5 * (1 - dist * 0.6)
         return max(minScale, min(1, CGFloat(level * weight)))
     }
 }
 
 // MARK: - Pulse (fPulse)
 
-/// `fPulse`: scale 1 ↔ 1.18, opacity .8 ↔ 1. Recording dot uses 1.5s; transcribing badge 1.1s.
 private struct Pulsing: ViewModifier {
     let duration: Double
     @State private var on = false
@@ -95,7 +89,6 @@ extension View {
 // MARK: - fRise transition
 
 extension AnyTransition {
-    /// `fRise`: fade in + translateY(10 → 0). Pair with `.easeOut(duration: 0.18)`.
     static var fRise: AnyTransition {
         .asymmetric(
             insertion: .opacity.combined(with: .offset(y: 10)),
@@ -103,10 +96,6 @@ extension AnyTransition {
         )
     }
 
-    /// Fade in + translateX, sliding out from behind whatever it's docked against (the widget
-    /// pill) rather than dropping in from above — for content that appears beside a fixed
-    /// anchor instead of above or below it. `fromTrailing` says which side that anchor is on:
-    /// true starts the slide from the trailing (right) side, false from the leading side.
     static func fSlideIn(fromTrailing: Bool) -> AnyTransition {
         .asymmetric(
             insertion: .opacity.combined(with: .offset(x: fromTrailing ? 10 : -10)),
@@ -117,8 +106,6 @@ extension AnyTransition {
 
 // MARK: - Keycap chip
 
-/// A rounded keycap chip ("no keys", "⌥ Space", "⌃⌃"). Defaults match the sidebar/widget
-/// pill style; override for the square-cornered variant used on settings/onboarding cards.
 struct Keycap: View {
     let text: String
     var fontSize: CGFloat = 11.5
@@ -140,7 +127,6 @@ struct Keycap: View {
 
 // MARK: - Toggle (settings)
 
-/// 42×24 toggle: track sage (on) / #DDE4DA (off), 18px white knob sliding left 3 ↔ 21px in 0.16s.
 struct LFToggle: View {
     let isOn: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -164,15 +150,13 @@ struct LFToggle: View {
 
 struct ChartBar: Identifiable {
     let id = UUID()
-    var fraction: Double            // 0…1 of the chart's height
+    var fraction: Double
     var color: Color
     var label: String? = nil
     var labelColor: Color = Theme.muted
     var labelWeight: CGFloat = 700
 }
 
-/// A simple bottom-anchored bar chart. Used both by the dark "Saved today" card
-/// (no labels, 64pt) and the Receipts "Words per day" card (labels, 170pt).
 struct WeekChart: View {
     var bars: [ChartBar]
     var chartHeight: CGFloat
@@ -207,7 +191,7 @@ struct WeekChart: View {
 // MARK: - Progress track (sidebar storage / player)
 
 struct ProgressTrack: View {
-    var fraction: Double            // 0…1
+    var fraction: Double
     var height: CGFloat = 6
     var track: Color = Theme.sagePale
     var fill: Color = Theme.sage
@@ -226,8 +210,6 @@ struct ProgressTrack: View {
 
 // MARK: - Spinning ring (in-row transcribing)
 
-/// A 12px ring with one lit edge, turning once every 0.7s. Replaces the indeterminate
-/// `ProgressView()` in a clip row, which read as a system control rather than as this app.
 struct SpinRing: View {
     var size: CGFloat = 12
     var lineWidth: CGFloat = 2
@@ -240,7 +222,6 @@ struct SpinRing: View {
     var body: some View {
         ZStack {
             Circle().stroke(track, lineWidth: lineWidth)
-            // A quarter turn of colour, starting at the top — the CSS `border-top-color` look.
             Circle()
                 .trim(from: 0, to: 0.25)
                 .stroke(lit, style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
@@ -255,8 +236,6 @@ struct SpinRing: View {
 
 // MARK: - Filter chip (Library)
 
-/// `All` · `Notes` · `Meetings`. Active is a marigold fill; inactive is an outline, so only one
-/// chip ever carries the signal colour.
 struct FilterChip: View {
     let title: String
     let active: Bool
@@ -289,11 +268,6 @@ struct FilterChip: View {
 
 // MARK: - Scrubber (editor)
 
-/// The editor's progress track, but draggable: a 16px marigold knob riding an 8px track, with
-/// a 6px vertical hit-slop so it can be grabbed without precision. Click anywhere on the track
-/// to jump there.
-///
-/// The position it shows belongs to the clip, not to the player — see `AppModel.progressByClip`.
 struct Scrubber: View {
     var fraction: Double
     var track: Color = Theme.creamLine
@@ -321,7 +295,6 @@ struct Scrubber: View {
                     .frame(width: knob, height: knob)
                     .scaleEffect(hovering || focused ? 1.15 : 1)
                     .shadow(color: Theme.marigold.opacity(hovering || focused ? 0.25 : 0), radius: 4)
-                    // Kept inside the track's ends so the knob never overhangs the card.
                     .offset(x: clamped * (width - knob))
             }
             .frame(height: knob, alignment: .center)
@@ -360,21 +333,15 @@ struct Scrubber: View {
 
     private func seek(_ x: CGFloat, in width: CGFloat) {
         guard width > knob else { return }
-        // The knob's travel is inset by its own width, so undo that to get the real position.
         onSeek(Double(max(0, min(1, (x - knob / 2) / (width - knob)))))
     }
 }
 
 // MARK: - Pointing-hand cursor
 
-/// Pointing-hand cursor over a clickable region, applied as a cursor rect rather than
-/// `NSCursor.push()/pop()` — push/pop unbalances the moment a hovered view disappears out from
-/// under the mouse, which the morphing widget pill and hover-only pills do constantly. A cursor
-/// rect can't drift like that: AppKit re-evaluates it itself.
 private struct ClickCursor: NSViewRepresentable {
     final class RectView: NSView {
         override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
-        // Never take the click or the hover — this view exists only to own a cursor rect.
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
     func makeNSView(context: Context) -> NSView { RectView() }
@@ -382,12 +349,8 @@ private struct ClickCursor: NSViewRepresentable {
 }
 
 extension View {
-    /// Shows the pointing-hand cursor while hovering this view. Purely visual — it does not
-    /// affect hit testing or add its own tap handling.
     func clickable() -> some View { overlay(ClickCursor()) }
 
-    /// `clickable()`, but only when `condition` holds — for a view whose tap does nothing in
-    /// some states (a turn block that seeks only while reading, not while editing).
     @ViewBuilder func clickable(if condition: Bool) -> some View {
         if condition { clickable() } else { self }
     }

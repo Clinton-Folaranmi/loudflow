@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// The permanent home for the API key (the other entry point is onboarding step 3). Cream
-/// card, styled to match Retention, placed directly below it. The key is saved to the
-/// Keychain — never UserDefaults.
 struct TranscriptionCard: View {
     @ObservedObject var model: AppModel
     @State private var keyInput: String = ""
@@ -20,7 +17,6 @@ struct TranscriptionCard: View {
                 Text("Transcription").font(Typo.font(15, 800)).foregroundColor(Theme.creamInk)
             }
 
-            // Provider (Deepgram default; Whisper slots in behind the same protocol).
             HStack(spacing: 8) {
                 ForEach(Provider.allCases, id: \.self) { p in
                     Button { model.provider = p; keyInput = "" } label: {
@@ -38,7 +34,6 @@ struct TranscriptionCard: View {
             }
             .animation(reduceMotion ? nil : Motion.feedback, value: model.provider)
 
-            // Key field + save
             HStack(spacing: 8) {
                 SecureField(model.hasKey ? "•••••••••• (saved)" : "Paste your \(model.provider.displayName) API key", text: $keyInput)
                     .textFieldStyle(.plain)
@@ -93,8 +88,6 @@ struct TranscriptionCard: View {
         .background(RoundedRectangle(cornerRadius: Theme.Radius.cardSmall).fill(Theme.cream))
     }
 
-    /// The standing privacy paragraph, folded into an affordance so it doesn't shout on every
-    /// visit — but the sentence itself is unchanged and still names the cloud round trip.
     private var audioDestination: some View {
         Button { infoPinned.toggle() } label: {
             HStack(spacing: 6) {

@@ -19,3 +19,18 @@ Resources/Assets.xcassets/solar-*.imageset/
 
 # Generated DMG background
 scripts/dmg-bg.png
+
+# Launch video build output
+marketing/launch-video/node_modules/
+marketing/launch-video/frames/
+marketing/launch-video/stills/
+marketing/launch-video/*.mp4
+marketing/launch-video/sfx.wav
+
+# Polished launch-video renders and preserved original export
+marketing/launch-video/frames-polished/
+marketing/launch-video/original/*.mp4
+marketing/launch-video/*.m4a
+marketing/launch-video/frames-cinematic/
+marketing/launch-video/stills-cinematic/
+marketing/launch-video/film-score.wav

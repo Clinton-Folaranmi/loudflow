@@ -2,21 +2,15 @@ import SwiftUI
 import CoreText
 import AppKit
 
-/// Nunito, the app's only typeface. The bundled `Nunito.ttf` is a variable font; this maps
-/// the design spec's discrete weights (400–800) onto the `wght` axis. Falls back to the
-/// system font if the file hasn't been fetched yet, so the project still builds/previews.
 enum Typo {
     static let family = "Nunito"
 
-    // The variable-font weight axis, four-char code 'wght'.
     private static let wghtAxis = NSNumber(value: 0x77676874 as UInt32)
 
     private static var didRegister = false
     static func registerIfNeeded() {
         guard !didRegister else { return }
         didRegister = true
-        // Also registered by ATSApplicationFontsPath in Info.plist; this covers previews/tests
-        // and either bundle layout (Fonts/ subfolder or flattened at the Resources root).
         if let url = Bundle.main.url(forResource: "Nunito", withExtension: "ttf", subdirectory: "Fonts")
             ?? Bundle.main.url(forResource: "Nunito", withExtension: "ttf") {
             CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
@@ -28,7 +22,6 @@ enum Typo {
         return NSFontManager.shared.availableFontFamilies.contains(family)
     }
 
-    /// A Nunito NSFont at an arbitrary numeric weight via the variable axis.
     private static func nunito(_ size: CGFloat, _ weight: CGFloat) -> NSFont? {
         guard available else { return nil }
         let attrs: [CFString: Any] = [
@@ -50,21 +43,18 @@ enum Typo {
         }
     }
 
-    /// A SwiftUI Font in Nunito at `size`/`weight`, or a weighted system fallback.
     static func font(_ size: CGFloat, _ weight: CGFloat) -> Font {
         if let ns = nunito(size, weight) { return Font(ns) }
         return .system(size: size, weight: systemWeight(weight))
     }
 }
 
-/// One row from the spec's type table: size, weight, letter-spacing (em), line-height (×).
 struct TextStyleSpec {
     var size: CGFloat
     var weight: CGFloat
     var trackingEm: CGFloat = 0
     var lineHeight: CGFloat? = nil
 
-    // Roles, straight from the README type table.
     static let greeting        = TextStyleSpec(size: 34, weight: 800, trackingEm: -0.03, lineHeight: 1.1)
     static let pageTitle       = TextStyleSpec(size: 32, weight: 800, trackingEm: -0.03, lineHeight: 1.1)
     static let subtitle        = TextStyleSpec(size: 14.5, weight: 400)
@@ -93,10 +83,9 @@ private struct TextStyleModifier: ViewModifier {
         var v = AnyView(
             content
                 .font(Typo.font(spec.size, spec.weight))
-                .tracking(spec.trackingEm * spec.size) // em → points
+                .tracking(spec.trackingEm * spec.size)
         )
         if let lh = spec.lineHeight {
-            // SwiftUI lineSpacing is *extra* leading; approximate the multiple.
             v = AnyView(v.lineSpacing(spec.size * (lh - 1)))
         }
         return v
@@ -104,6 +93,5 @@ private struct TextStyleModifier: ViewModifier {
 }
 
 extension View {
-    /// Applies a role from the spec's type table (font + tracking + line-height).
     func textStyle(_ spec: TextStyleSpec) -> some View { modifier(TextStyleModifier(spec: spec)) }
 }

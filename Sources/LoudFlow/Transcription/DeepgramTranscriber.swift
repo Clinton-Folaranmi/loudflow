@@ -1,35 +1,12 @@
 import Foundation
 
-/// Deepgram pre-recorded transcription (the shipping default).
-///
-/// Privacy posture (matches the spec's "zero-retention" requirement):
-///   • `mip_opt_out=true` opts the audio out of Deepgram's Model Improvement Program, so it
-///     is not retained to train models. (For the strongest guarantee, also disable data
-///     logging at the Deepgram project level.)
-///
-/// Formatting posture: `punctuate`, `paragraphs`, and `smart_format` are **on**. That output is
-/// the ASR model's own — punctuation, breaks at natural pauses, and readable numbers, dates and
-/// currency — not a rewrite, so there is nothing for the user to opt out of. Rewording is what
-/// the app refuses, and no request here asks for any.
-///
-/// `diarize=true` returns a speaker index per word, which becomes the clip's turns. When the
-/// recording has two tracks (mic on channel 0, system audio on channel 1) `multichannel=true`
-/// is added as well, so channel 0 is known to be you and diarization only has to split the
-/// remote side.
-///
-/// `keywords` is nova-2's decoding-bias hint — one `word:intensifier` pair per boosted term. `2`
-/// is a modest nudge on purpose: over-boosting trades misses for false positives the other way.
-/// (Moving to nova-3 renames this to `keyterm` and drops the intensifier — update both call
-/// sites here if that ever happens.)
 struct DeepgramTranscriber: Transcriber {
     private static let base = "https://api.deepgram.com/v1/listen"
     private static let common =
         "model=nova-2&punctuate=true&paragraphs=true&smart_format=true&diarize=true&mip_opt_out=true"
 
-    /// `.urlQueryAllowed` alone still passes through `&`, `=`, `+`, `?`, `#` — each a
-    /// delimiter with its own meaning in a query string, so a term containing one has to lose
-    /// it here rather than fold it into the URL's own structure.
     private static let queryValueAllowed: CharacterSet = {
+        // URL delimiters must be escaped inside keyword values.
         var set = CharacterSet.urlQueryAllowed
         set.remove(charactersIn: "&=+?#")
         return set
@@ -82,13 +59,6 @@ struct DeepgramTranscriber: Transcriber {
         return (200..<300).contains(http.statusCode)
     }
 
-    // MARK: - Words → turns
-
-    /// Collapses consecutive words by the same speaker into turns, in time order.
-    ///
-    /// With two tracks, the channel decides the speaker and diarization only subdivides the
-    /// remote side: channel 0 is you (local index 0), channel 1's diarized speakers start at 1.
-    /// With one track, the diarized index is used directly.
     static func result(from channels: [DeepgramResponse.Channel], twoTrack: Bool) -> TranscriptionResult {
         struct Word { let speaker: Int; let at: TimeInterval; let text: String }
 
@@ -109,7 +79,6 @@ struct DeepgramTranscriber: Transcriber {
         }
         words.sort { $0.at < $1.at }
 
-        // No per-word detail (or no diarization) — fall back to the flat transcript.
         guard !words.isEmpty else {
             let flat = channels
                 .compactMap { $0.alternatives?.first?.transcript }
@@ -129,7 +98,6 @@ struct DeepgramTranscriber: Transcriber {
         }
 
         let flat = turns.map(\.text).joined(separator: " ")
-        // One voice is a note, not a conversation — it lives in `text` alone.
         let distinct = Set(turns.map(\.speaker))
         return TranscriptionResult(text: flat, turns: distinct.count > 1 ? turns : nil)
     }

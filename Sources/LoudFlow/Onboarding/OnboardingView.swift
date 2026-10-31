@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// First-run onboarding, now **four** steps: mic check → trigger → **API key (required)** →
-/// retention. The key step is net-new (added with the app owner's sign-off): nothing
-/// transcribes without a key, so "Next" is disabled until one is entered.
 struct OnboardingView: View {
     @ObservedObject var model: AppModel
     @State private var keyInput: String = ""
@@ -19,9 +16,6 @@ struct OnboardingView: View {
                             body: "Just checking your mic works. Nothing is recorded yet.")
         case 1: return Copy(kicker: "Step 2", title: "How do you want to record?",
                             body: "You can change this anytime.")
-        // Steps 3 and 4 are one line each, so no step's body needs reserved height and the
-        // card stays a constant size as you page through it. The cloud round trip is still
-        // named — on step 3 and in Settings — so step 4 does not repeat the provider.
         case 2: return Copy(kicker: "Step 3", title: "Add your transcription key.",
                             body: "Nothing transcribes without your \(model.provider.displayName) key.")
         default: return Copy(kicker: "Step 4", title: "How long to keep recordings?",
@@ -36,10 +30,9 @@ struct OnboardingView: View {
     var body: some View {
         ZStack {
             Color(hex: 0x1E261E, alpha: 0.5).ignoresSafeArea()
-                .background(.ultraThinMaterial)     // approximates the blur(4px) scrim
+                .background(.ultraThinMaterial)
 
             VStack(spacing: 0) {
-                // Progress segments (4)
                 HStack(spacing: 5) {
                     ForEach(0..<4, id: \.self) { i in
                         Capsule()
@@ -50,7 +43,6 @@ struct OnboardingView: View {
                 .padding(EdgeInsets(top: 18, leading: 22, bottom: 0, trailing: 22))
                 .animation(reduceMotion ? nil : Motion.page, value: step)
 
-                // Kicker / title / body
                 VStack(alignment: .leading, spacing: 8) {
                     Text(copy.kicker).textStyle(.onboardingKicker).foregroundColor(Theme.marigoldInk)
                     Text(copy.title).textStyle(.onboardingTitle).foregroundColor(Theme.ink)
@@ -61,8 +53,6 @@ struct OnboardingView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(EdgeInsets(top: 24, leading: 26, bottom: 6, trailing: 26))
 
-                // Step content. Each step's own section reserves the 192pt, and centres its
-                // content inside it, so the card height never changes between steps.
                 ZStack {
                     stepContent
                         .id(step)
@@ -74,7 +64,6 @@ struct OnboardingView: View {
                     .frame(maxWidth: .infinity, minHeight: 192, alignment: .center)
                     .padding(EdgeInsets(top: 18, leading: 26, bottom: 0, trailing: 26))
 
-                // Footer
                 HStack(spacing: 10) {
                     Button { direction = -1; model.onboardingBack() } label: {
                         Text(step == 0 ? "Skip all this" : "Back")
@@ -114,8 +103,6 @@ struct OnboardingView: View {
         model.onboardingNext()
     }
 
-    // MARK: Step content
-
     @ViewBuilder private var stepContent: some View {
         switch step {
         case 0: micStep
@@ -131,9 +118,6 @@ struct OnboardingView: View {
         VStack(spacing: 9) {
             ForEach(TriggerMode.allCases, id: \.self) { t in
                 Button { model.selectTrigger(t) } label: {
-                    // icon · name · keycap. The name takes the slack so the keycap sits hard
-                    // right. The descriptions live on the Settings trigger cards now — here
-                    // they only made the modal taller on one step than on the others.
                     HStack(spacing: 13) {
                         SolarIcon(name: t.iconName, size: 22, color: Theme.sage)
                         Text(t.name)
@@ -211,7 +195,6 @@ struct OnboardingView: View {
     }
 }
 
-/// Live mic test: real bars that move with your voice, and a label that confirms it hears you.
 private struct MicTestView: View {
     @StateObject private var meter = MicMeter()
 

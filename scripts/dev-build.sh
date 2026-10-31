@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build LoudFlow (Release), sign it with the stable self-signed identity so the Accessibility
+# Build LoudFlow (Release), sign it with a stable local identity so the Accessibility
 # grant survives rebuilds, install to /Applications, and drop a versioned zip on the Desktop.
 #
 # One-time setup of the signing identity lives in scripts/dev-signing-setup.sh.
@@ -9,7 +9,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PATH="/opt/homebrew/bin:$PATH"
 
-IDENTITY="LoudFlow Self-Signed"
+IDENTITY="${LOUDFLOW_SIGNING_IDENTITY:-}"
+if [[ -z "$IDENTITY" && -s build/signing-identity ]]; then
+  IFS= read -r IDENTITY < build/signing-identity
+fi
+IDENTITY="${IDENTITY:-LoudFlow Self-Signed}"
 APP="build/dd/Build/Products/Release/LoudFlow.app"
 
 echo "==> Generating project…"
@@ -20,15 +24,13 @@ xcodebuild -project LoudFlow.xcodeproj -scheme LoudFlow -configuration Release \
   -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO build >/tmp/lf_build.log 2>&1 \
   || { echo "BUILD FAILED:"; tail -30 /tmp/lf_build.log; exit 1; }
 
-# Try the stable identity directly — untrusted self-signed identities work for codesign even
-# though `find-identity` won't list them. Fall back to ad-hoc only if signing actually fails.
+# Keep one code identity across builds so macOS can keep the Accessibility grant.
 echo "==> Signing…"
-if codesign --force --deep --sign "$IDENTITY" "$APP" 2>/tmp/lf_sign.log; then
-  echo "    signed with '$IDENTITY' (Accessibility grant persists across rebuilds)"
-else
-  echo "    '$IDENTITY' unavailable — ad-hoc (run scripts/dev-signing-setup.sh to make grants stick)"
-  codesign --force --deep --sign - "$APP"
+if ! codesign --force --deep --sign "$IDENTITY" "$APP"; then
+  echo "Signing failed. Set LOUDFLOW_SIGNING_IDENTITY to a certificate fingerprint or run scripts/dev-signing-setup.sh, then retry." >&2
+  exit 1
 fi
+echo "    signed with '$IDENTITY' (Accessibility grant persists across rebuilds)"
 
 echo "==> Installing to /Applications…"
 pkill -f "/Applications/LoudFlow.app/Contents/MacOS/LoudFlow" 2>/dev/null || true

@@ -3,9 +3,6 @@ import SwiftUI
 struct ReceiptsView: View {
     @ObservedObject var model: AppModel
 
-    /// Which day's panel is showing, by index rather than `DayWords.id` — `model.weekWords`
-    /// synthesizes a fresh UUID on every access, so an id captured in one render would never
-    /// match the id in the next. The index (0…6, oldest→today) is stable across renders.
     @State private var hoveredIndex: Int?
     @State private var focusedIndex: Int?
     @State private var pinnedIndex: Int?
@@ -41,8 +38,6 @@ struct ReceiptsView: View {
         Card {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Words per day").font(Typo.font(16, 800)).foregroundColor(Theme.ink)
-                // 112pt of headroom so the tallest bar's hover panel never covers the heading.
-                // zIndex above the caption line below, so a short bar's panel clears it too.
                 chart.padding(.top, 112).zIndex(1)
                 Text(model.longestCaption)
                     .font(Typo.font(13, 400)).foregroundColor(Theme.body)
@@ -50,17 +45,11 @@ struct ReceiptsView: View {
         }
     }
 
-    /// The week's bars, each one its own hover target. Hovering turns the bar marigold and
-    /// floats the day's detail above it — anchored to the bar, so the panel tracks the day's
-    /// height instead of sitting at a fixed line.
-    ///
-    /// Hover state lives here, not on each `DayColumn`, so the hovered column's `zIndex` can be
-    /// raised above its neighbours — an `HStack`'s children otherwise paint in order, which is
-    /// why a panel used to disappear behind the next bar.
     private var chart: some View {
         let week = model.weekWords
         let maxWords = max(1, week.map(\.words).max() ?? 1)
 
+        // weekWords creates fresh UUIDs on each read; indices remain stable.
         return HStack(alignment: .top, spacing: 16) {
             ForEach(Array(week.enumerated()), id: \.offset) { index, day in
                 DayColumn(
@@ -88,7 +77,6 @@ struct ReceiptsView: View {
     }
 }
 
-/// One day of the chart: the bar, its weekday label, and the detail panel on hover.
 private struct DayColumn: View {
     let day: AppModel.DayWords
     let fraction: Double

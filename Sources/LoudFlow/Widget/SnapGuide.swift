@@ -1,11 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The three screen edges the widget can dock to (top is reserved for the menu bar).
 enum WidgetEdge: Equatable { case left, right, bottom }
 
-/// A full-screen, click-through overlay shown while dragging the widget. It highlights the
-/// three dockable edges and emphasizes the one the widget will snap to.
 final class SnapGuideController {
     private let panel: NSPanel
     private let hosting: NSHostingView<SnapGuideView>

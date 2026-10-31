@@ -1,11 +1,5 @@
 import SwiftUI
 
-/// A clip row, shared by Today and Library. Clicking the row opens the clip in Library;
-/// the leading circle and the copy pill stop propagation so they don't also open it.
-///
-/// The leading circle says **what kind of recording this is** — a soundwave for a note, a group
-/// for a meeting — and morphs to play on hover. That is the only place the two kinds are
-/// announced, because the kind is derived from how many voices were heard, not chosen.
 struct ClipRowView: View {
     enum Variant { case today, library }
 
@@ -44,9 +38,6 @@ struct ClipRowView: View {
         }
     }
 
-    // MARK: Leading circle
-
-    /// Rest shows the kind; hover offers to play it; playing offers to stop.
     private var leadingIcon: String {
         if isPlaying { return Solar.pause }
         if hovering { return Solar.play }
@@ -65,7 +56,6 @@ struct ClipRowView: View {
 
     var body: some View {
         HStack(spacing: rowGap) {
-            // Play / pause — stops propagation so playback never opens the clip.
             Button { model.play(clip) } label: {
                 ZStack {
                     Circle().fill(circleFill)
@@ -84,9 +74,6 @@ struct ClipRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(previewText)
                     .font(Typo.font(14, isSelected && variant == .library ? 700 : 400))
-                    // Nunito gains width as its variable weight axis gets heavier. Tighten
-                    // letter spacing in the selected state so the same title doesn't lurch
-                    // sideways when its weight changes.
                     .tracking(isSelected && variant == .library ? -0.18 : 0)
                     .foregroundColor(clip.needsTranscription ? Theme.muted : Theme.ink)
                     .lineLimit(1)
@@ -147,15 +134,12 @@ struct ClipRowView: View {
 
     @ViewBuilder private var trailingAction: some View {
         if isTranscribing {
-            // Copy and retry stay hidden while a row is transcribing — there is nothing to act
-            // on yet.
             HStack(spacing: 7) {
                 SpinRing()
                 Text("Transcribing…").font(Typo.font(11.5, 700)).foregroundColor(Theme.muted)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
         } else if clip.needsTranscription {
-            // Retry — always visible (it's an error to fix).
             Button { model.retryTranscription(clip.id) } label: {
                 HStack(spacing: 6) {
                     SolarIcon(name: Solar.restart, size: 13, color: Theme.marigoldInk)
@@ -167,8 +151,6 @@ struct ClipRowView: View {
             .buttonStyle(PressFeedbackStyle())
             .clickable()
         } else {
-            // Copy pill — hidden until hover. One button: a meeting copies with speaker names,
-            // a note copies bare. Confirmation is the pill's own icon/label swap, not a toast.
             Button(action: copyTapped) {
                 HStack(spacing: 6) {
                     SolarIcon(name: justCopied ? Solar.check : Solar.copy, size: 13, color: Theme.body)
