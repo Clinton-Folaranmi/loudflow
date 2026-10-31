@@ -89,7 +89,7 @@ enum Provider: String, CaseIterable, Codable {
     var displayName: String {
         switch self {
         case .deepgram: return "Deepgram"
-        case .whisper:  return "OpenAI Whisper"
+        case .whisper:  return "OpenAI"
         }
     }
 
@@ -122,6 +122,7 @@ enum TranscriptionFailure: Equatable {
     case missingKey
     case rejectedKey
     case outOfCredit
+    case tooLarge
     case network
 
     var message: String {
@@ -129,6 +130,7 @@ enum TranscriptionFailure: Equatable {
         case .missingKey:  return "No transcription key yet."
         case .rejectedKey: return "That key was rejected."
         case .outOfCredit: return "Transcription account is out of credit."
+        case .tooLarge:    return "Too long for this provider's upload limit."
         case .network:     return "No network — saved it to try later."
         }
     }
@@ -138,6 +140,7 @@ enum TranscriptionFailure: Equatable {
         case .missingKey:  return "Add one"
         case .rejectedKey: return "Fix it"
         case .outOfCredit: return "Open settings"
+        case .tooLarge:    return "Open settings"
         case .network:     return ""
         }
     }

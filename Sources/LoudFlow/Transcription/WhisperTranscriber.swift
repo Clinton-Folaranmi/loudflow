@@ -4,20 +4,31 @@ struct WhisperTranscriber: Transcriber {
     private let endpoint = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
     private var apiKey: String? { Keychain.key(for: .whisper) }
 
-    private static let promptCharBudget = 700
+    // whisper-1 shuts down on 2027-02-26. It stays only for keys that can't use gpt-transcribe yet.
+    private static let model = "gpt-transcribe"
+    private static let fallbackModel = "whisper-1"
+    private static let uploadLimit = 25_000_000
 
-    func transcribe(_ audioURL: URL, twoTrack: Bool, vocabulary: [String]) async throws -> TranscriptionResult {
+    func transcribe(_ audioURL: URL, twoTrack: Bool) async throws -> TranscriptionResult {
         guard let key = apiKey else { throw TranscriberError.missingKey }
         guard let audio = try? Data(contentsOf: audioURL) else { throw TranscriberError.decoding }
+        guard audio.count < Self.uploadLimit else { throw TranscriberError.tooLarge }
 
+        let fileName = audioURL.lastPathComponent
+        do {
+            return try await send(audio, fileName: fileName, model: Self.model, key: key)
+        } catch TranscriberError.server(let code) where code == 400 || code == 404 {
+            return try await send(audio, fileName: fileName, model: Self.fallbackModel, key: key)
+        }
+    }
+
+    private func send(_ audio: Data, fileName: String, model: String, key: String) async throws -> TranscriptionResult {
         let boundary = "loudflow-\(UUID().uuidString)"
-        var req = URLRequest(url: endpoint)
+        var req = URLRequest(url: endpoint, timeoutInterval: Self.requestTimeout)
         req.httpMethod = "POST"
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        req.httpBody = Self.multipartBody(boundary: boundary, audio: audio,
-                                          fileName: audioURL.lastPathComponent,
-                                          prompt: Self.prompt(from: vocabulary))
+        req.httpBody = Self.multipartBody(boundary: boundary, audio: audio, fileName: fileName, model: model)
 
         let (data, response): (Data, URLResponse)
         do {
@@ -28,8 +39,9 @@ struct WhisperTranscriber: Transcriber {
         guard let http = response as? HTTPURLResponse else { throw TranscriberError.network }
         guard (200..<300).contains(http.statusCode) else { throw mapStatus(http.statusCode) }
 
-        guard let text = String(data: data, encoding: .utf8) else { throw TranscriberError.decoding }
-        return .plain(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard let decoded = try? JSONDecoder().decode(OpenAITranscription.self, from: data)
+        else { throw TranscriberError.decoding }
+        return .plain(decoded.text.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     func validateKey() async -> Bool {
@@ -41,28 +53,15 @@ struct WhisperTranscriber: Transcriber {
         return (200..<300).contains(http.statusCode)
     }
 
-    private static func prompt(from vocabulary: [String]) -> String {
-        var parts: [String] = []
-        var total = 0
-        for term in vocabulary {
-            let added = term.count + (parts.isEmpty ? 0 : 2)
-            guard total + added <= promptCharBudget else { break }
-            parts.append(term)
-            total += added
-        }
-        return parts.joined(separator: ", ")
-    }
-
-    private static func multipartBody(boundary: String, audio: Data, fileName: String, prompt: String) -> Data {
+    private static func multipartBody(boundary: String, audio: Data, fileName: String, model: String) -> Data {
         var body = Data()
         func field(_ name: String, _ value: String) {
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
             body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
             body.append("\(value)\r\n".data(using: .utf8)!)
         }
-        field("model", "whisper-1")
-        field("response_format", "text")
-        if !prompt.isEmpty { field("prompt", prompt) }
+        field("model", model)
+        field("response_format", "json")
 
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
@@ -72,4 +71,8 @@ struct WhisperTranscriber: Transcriber {
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         return body
     }
+}
+
+private struct OpenAITranscription: Decodable {
+    let text: String
 }

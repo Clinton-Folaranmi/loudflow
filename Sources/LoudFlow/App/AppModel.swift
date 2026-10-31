@@ -64,9 +64,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    @Published var vocabulary: [String] { didSet { Preferences.vocabulary = vocabulary } }
-    private static let vocabularyLimit = 100
-
     let voices = VoiceStore()
     let recognizer = VoiceRecognizer()
     @Published var playingVoiceId: Int?
@@ -103,12 +100,12 @@ final class AppModel: ObservableObject {
         self.provider = prov
         self.clips = Persistence.shared.loadClips()
         self.displayName = Preferences.displayName ?? ""
-        self.vocabulary = Preferences.vocabulary
         self.playbackRate = Preferences.playbackRate
         self.transcriber = TranscriberFactory.make(provider: prov)
         self.selectedId = clips.first?.id
 
         voices.rename(Voice.youID, to: userFirstName)
+        Preferences.removeRetiredKeys()
 
         refreshKeyStatus()
         wireUp()
@@ -251,11 +248,10 @@ final class AppModel: ObservableObject {
         guard let clip = clips.first(where: { $0.id == clipID }) else { return }
         let url = Persistence.shared.url(forAudio: clip.audioFileName)
         let twoTrack = clip.twoTrack
-        let vocabulary = effectiveVocabulary
         transcribingIds.insert(clipID)
         Task {
             do {
-                let result = try await transcriber.transcribe(url, twoTrack: twoTrack, vocabulary: vocabulary)
+                let result = try await transcriber.transcribe(url, twoTrack: twoTrack)
                 await MainActor.run { self.finishTranscription(clipID: clipID, result: result, insert: insertOnFinish) }
             } catch let e as TranscriberError {
                 await MainActor.run { self.handleTranscribeFailure(clipID: clipID, error: e, insert: insertOnFinish) }
@@ -331,6 +327,7 @@ final class AppModel: ObservableObject {
             case .missingKey:                  msg = "Add a transcription key in Settings."
             case .auth:                        keyStatus = .rejected; msg = "That key was rejected."
             case .credit:                      msg = "Transcription account is out of credit."
+            case .tooLarge:                    msg = tooLargeMessage
             }
             toast = Toast(message: msg)
             scheduleToastDismiss()
@@ -347,7 +344,14 @@ final class AppModel: ObservableObject {
         case .missingKey: widgetState = .error(.missingKey)
         case .auth:       keyStatus = .rejected; widgetState = .error(.rejectedKey)
         case .credit:     widgetState = .error(.outOfCredit)
+        case .tooLarge:   widgetState = .error(.tooLarge)
         }
+    }
+
+    private var tooLargeMessage: String {
+        provider == .whisper
+            ? "Over OpenAI's 25 MB upload limit. Deepgram takes long recordings."
+            : "That recording is too large to upload."
     }
 
     func retryTranscription(_ id: UUID) {
@@ -395,39 +399,106 @@ final class AppModel: ObservableObject {
         for (i, local) in toMint.enumerated() { map[local] = minted[i] }
 
         clips[idx].turns = localTurns.map {
-            Turn(speaker: map[$0.speaker] ?? Voice.youID, at: $0.at, text: $0.text)
+            Turn(speaker: map[$0.speaker] ?? Voice.youID, at: $0.at, text: $0.text, end: $0.end)
         }
         clips[idx].text = clips[idx].flattenedTurns
     }
 
     private func recogniseVoices(inClip id: UUID) {
+        guard let clip = clips.first(where: { $0.id == id }), !clip.audioDeleted else { return }
+        guard clip.isConversation else { learnYourVoice(fromSolo: clip); return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            if clip.twoTrack, clip.speakerIds.contains(Voice.youID) {
+                await self.reinforce(Voice.youID, in: id, confirmed: false)
+            } else if self.voices.voice(Voice.youID)?.embedding == nil {
+                await self.bootstrapYourVoice()
+            }
+            await self.suggestVoices(inClip: id)
+        }
+    }
+
+    // Matches are suggestions; a person is never assigned automatically.
+    private func suggestVoices(inClip id: UUID) async {
         guard let clip = clips.first(where: { $0.id == id }), clip.isConversation, !clip.audioDeleted
         else { return }
 
-        let unknown = clip.speakerIds.filter { $0 != Voice.youID && !(voices.voice($0)?.isNamed ?? false) }
-        guard !unknown.isEmpty,
-              voices.voices.contains(where: { $0.isNamed && !$0.isYou && $0.embedding != nil })
-        else { return }
+        // Only a mic-only recording can still have you hiding under a "Speaker" label.
+        let youOpen = !clip.speakerIds.contains(Voice.youID)
+        let unknown = clip.speakerIds.filter {
+            $0 != Voice.youID && !(voices.voice($0)?.isNamed ?? false)
+                && !rejectedSuggestions.contains(Self.suggestionKey(id, $0))
+        }
+        let anyKnown = voices.voices.contains { $0.isNamed && $0.embedding != nil && (youOpen || !$0.isYou) }
+        guard !unknown.isEmpty, anyKnown else { return }
 
-        // Matches are suggestions; a person is never assigned automatically.
+        var proposals: [(speaker: Int, voice: Int, distance: Float)] = []
+        for speaker in unknown {
+            guard let current = clips.first(where: { $0.id == id }),
+                  let embedding = await recognizer.embedding(forSpeaker: speaker, in: current),
+                  let matched = recognizer.match(embedding, against: voices.voices, includingYou: youOpen)
+            else { continue }
+            proposals.append((speaker, matched.id, matched.distance))
+        }
+
+        // Closest pairs first, so a weaker match can't take a voice from a stronger one.
+        var claimed = Set(clip.speakerIds.filter { voices.voice($0)?.isNamed == true })
+        var found: [Int: Int] = [:]
+        for p in proposals.sorted(by: { $0.distance < $1.distance })
+        where !claimed.contains(p.voice) && found[p.speaker] == nil {
+            claimed.insert(p.voice)
+            found[p.speaker] = p.voice
+        }
+        guard !found.isEmpty else { return }
+        var forClip = suggestions[id] ?? [:]
+        for (speaker, matched) in found { forClip[speaker] = matched }
+        suggestions[id] = forClip
+    }
+
+    // Solo dictation is almost always you, so it teaches LoudFlow your voice for meetings.
+    private static let soloSamplesWanted = 12
+
+    private func learnYourVoice(fromSolo clip: Clip) {
+        guard let you = voices.voice(Voice.youID),
+              (you.embeddingCount ?? 0) < Self.soloSamplesWanted,
+              you.embedding != nil || clips.contains(where: \.isConversation)
+        else { return }
         Task { [weak self] in
-            guard let self else { return }
-            var claimed = Set(clip.speakerIds.compactMap { self.voices.voice($0)?.isNamed == true ? $0 : nil })
-            var found: [Int: Int] = [:]
-            for speaker in unknown {
-                guard !self.rejectedSuggestions.contains(Self.suggestionKey(id, speaker)),
-                      let current = self.clips.first(where: { $0.id == id }),
-                      let embedding = await self.recognizer.embedding(forSpeaker: speaker, in: current),
-                      let matched = self.recognizer.match(embedding, against: self.voices.voices),
-                      !claimed.contains(matched)
-                else { continue }
-                claimed.insert(matched)
-                found[speaker] = matched
+            guard let self,
+                  let current = self.clips.first(where: { $0.id == clip.id }),
+                  let embedding = await self.recognizer.embedding(ofSoloClip: current)
+            else { return }
+            self.learnYou(embedding, confirmed: false)
+        }
+    }
+
+    private func bootstrapYourVoice() async {
+        let recent = clips
+            .filter { !$0.isConversation && !$0.audioDeleted && $0.status == .done && $0.seconds >= 3 }
+            .prefix(3)
+        for clip in recent {
+            if let embedding = await recognizer.embedding(ofSoloClip: clip) {
+                learnYou(embedding, confirmed: false)
             }
-            guard !found.isEmpty else { return }
-            var forClip = self.suggestions[id] ?? [:]
-            for (speaker, matched) in found { forClip[speaker] = matched }
-            self.suggestions[id] = forClip
+        }
+    }
+
+    private func learnYou(_ embedding: [Float], confirmed: Bool) {
+        guard let you = voices.voice(Voice.youID) else { return }
+        // A settled profile ignores an unconfirmed sample that doesn't sound like you.
+        if !confirmed, (you.embeddingCount ?? 0) >= 3, !recognizer.isConsistent(embedding, with: you) { return }
+        voices.learn(embedding, for: Voice.youID)
+    }
+
+    private func reinforce(_ voice: Int, in clipID: UUID, confirmed: Bool) async {
+        guard let clip = clips.first(where: { $0.id == clipID }), !clip.audioDeleted,
+              let embedding = await recognizer.embedding(forSpeaker: voice, in: clip)
+        else { return }
+        if voice == Voice.youID {
+            learnYou(embedding, confirmed: confirmed)
+        } else {
+            voices.learn(embedding, for: voice)
         }
     }
 
@@ -532,34 +603,6 @@ final class AppModel: ObservableObject {
         voices.forget(id)
     }
 
-    func addTerm(_ raw: String) {
-        let term = raw.trimmingCharacters(in: .whitespaces)
-        guard !term.isEmpty, !vocabulary.contains(where: { $0.caseInsensitiveCompare(term) == .orderedSame })
-        else { return }
-        guard vocabulary.count < Self.vocabularyLimit else {
-            toast = Toast(message: "That's \(Self.vocabularyLimit) terms — remove one to add another.")
-            scheduleToastDismiss()
-            return
-        }
-        vocabulary.append(term)
-    }
-
-    func removeTerm(_ term: String) {
-        vocabulary.removeAll { $0 == term }
-    }
-
-    var effectiveVocabulary: [String] {
-        var seen = Set<String>()
-        var out: [String] = []
-        for term in vocabulary + voices.voices.compactMap(\.name) {
-            let key = term.lowercased()
-            guard !key.isEmpty, !seen.contains(key) else { continue }
-            seen.insert(key)
-            out.append(term)
-        }
-        return out
-    }
-
     private func isYouName(_ name: String) -> Bool {
         let key = name.trimmingCharacters(in: .whitespaces).lowercased()
         guard !key.isEmpty else { return false }
@@ -568,19 +611,14 @@ final class AppModel: ObservableObject {
 
     private func captureSampleAndEmbedding(for voice: Int, in clipID: UUID) {
         guard let clip = clips.first(where: { $0.id == clipID }), !clip.audioDeleted else { return }
-        if let at = clip.turns?.first(where: { $0.speaker == voice })?.at {
+        let longest = clip.turns?.filter { $0.speaker == voice }.max { $0.text.count < $1.text.count }
+        if let at = longest?.at {
             voices.captureSample(for: voice, from: Persistence.shared.url(forAudio: clip.audioFileName), at: at)
         }
-        Task { [weak self] in
-            guard let self,
-                  let current = self.clips.first(where: { $0.id == clipID }),
-                  let embedding = await self.recognizer.embedding(forSpeaker: voice, in: current)
-            else { return }
-            self.voices.setEmbedding(embedding, for: voice)
-        }
+        Task { [weak self] in await self?.reinforce(voice, in: clipID, confirmed: true) }
     }
 
-    func reassignSpeaker(_ speaker: Int, in clipID: UUID, to voice: Int) {
+    func reassignSpeaker(_ speaker: Int, in clipID: UUID, to voice: Int, learn: Bool = true) {
         guard speaker != voice,
               let idx = clips.firstIndex(where: { $0.id == clipID }),
               var turns = clips[idx].turns, turns.contains(where: { $0.speaker == speaker })
@@ -590,6 +628,10 @@ final class AppModel: ObservableObject {
         clips[idx].text = clips[idx].flattenedTurns
         persist()
         pruneVoices()
+        // Picking a named voice confirms it, so this recording sharpens that voice's profile.
+        if learn, voices.voice(voice)?.isNamed == true {
+            Task { [weak self] in await self?.reinforce(voice, in: clipID, confirmed: true) }
+        }
     }
 
     @discardableResult
@@ -623,7 +665,7 @@ final class AppModel: ObservableObject {
 
         let resolved = voices.rename(target, to: trimmed)
         if resolved != target {
-            reassignSpeaker(target, in: clipID, to: resolved)
+            reassignSpeaker(target, in: clipID, to: resolved, learn: false)
         }
         captureSampleAndEmbedding(for: resolved, in: clipID)
 

@@ -31,10 +31,11 @@ The app is intentionally **not sandboxed** — the sandbox blocks global hotkeys
 text insertion. See `Resources/LoudFlow.entitlements`.
 
 ### Transcription key
-LoudFlow uses **Deepgram** by default. Onboarding step 3 asks for your API key (nothing
-transcribes without one); you can change it later in **Settings → Transcription**. The key is
-stored in the **macOS Keychain**, never in preferences. A pluggable `Transcriber` protocol
-lets an OpenAI Whisper adapter slot in (`Sources/LoudFlow/Transcription/`).
+LoudFlow uses **Deepgram** (Nova-3, with Deepgram's current diarizer) by default. Onboarding
+step 3 asks for your API key (nothing transcribes without one); you can change it later in
+**Settings → Transcription**. The key is stored in the **macOS Keychain**, never in preferences.
+OpenAI (`gpt-transcribe`) is the alternative provider; it has no speaker labels and a 25 MB
+upload limit. Both sit behind the `Transcriber` protocol (`Sources/LoudFlow/Transcription/`).
 
 ---
 
@@ -45,7 +46,7 @@ Sources/LoudFlow/
   LoudFlowApp.swift        @main — app lifecycle, main window, floating widget panel (no menu-bar item)
   App/                     AppModel (central state), Persistence (JSON + audio), Keychain, Preferences
   Audio/                   AudioRecorder (→ .m4a on disk), AudioPlayer (progress)
-  Transcription/           Transcriber protocol, DeepgramTranscriber, WhisperTranscriber, TranscriptionQueue
+  Transcription/           Transcriber protocol, DeepgramTranscriber, WhisperTranscriber (OpenAI), TurnBuilder, TranscriptionQueue
   Input/                   HotkeyManager (⌥Space hold / ⌃⌃ double-tap), TextInserter, Permissions
   Widget/                  WidgetPanel (borderless NSPanel), WidgetView (idle/recording/transcribing/error/queued)
   Windows/                 MainWindow, Sidebar, TodayView, LibraryView, SettingsView, ReceiptsView

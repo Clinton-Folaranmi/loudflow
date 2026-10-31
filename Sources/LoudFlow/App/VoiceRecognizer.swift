@@ -21,7 +21,10 @@ final class VoiceRecognizer: ObservableObject {
     private static let matchDistance: Float = 0.45
     private static let requiredMargin: Float = 0.08
 
-    private static let maxSeconds: Double = 12
+    // The embedder hears a 10 s window and cuts off the rest.
+    private static let maxSeconds: Double = 10
+    private static let minSeconds: Double = 1
+    private static let rate: Double = 16_000
 
     @discardableResult
     func prepare() async -> Bool {
@@ -51,15 +54,29 @@ final class VoiceRecognizer: ObservableObject {
     }
 
     func embedding(forSpeaker speaker: Int, in clip: Clip) async -> [Float]? {
-        guard !clip.audioDeleted, await prepare(), let diarizer else { return nil }
-        guard let samples = Self.samples(forSpeaker: speaker, in: clip), samples.count >= 16_000
-        else { return nil }
-        return try? diarizer.extractSpeakerEmbedding(from: samples)
+        guard !clip.audioDeleted, let turns = clip.turns else { return nil }
+        var spans: [(from: TimeInterval, to: TimeInterval)] = []
+        for (i, turn) in turns.enumerated() where turn.speaker == speaker {
+            let next = i + 1 < turns.count ? turns[i + 1].at : Double(clip.seconds)
+            let to = turn.end ?? next
+            if to > turn.at { spans.append((turn.at, to)) }
+        }
+        // Long turns are cleaner than a word here and there.
+        spans.sort { $0.to - $0.from > $1.to - $1.from }
+        let channel = speaker == Voice.youID || !clip.twoTrack ? 0 : 1
+        return await embed(clip, channel: channel, spans: spans)
     }
 
-    func match(_ embedding: [Float], against voices: [Voice]) -> Int? {
+    func embedding(ofSoloClip clip: Clip) async -> [Float]? {
+        guard !clip.audioDeleted, !clip.isConversation else { return nil }
+        // The start earcon can leak into the first moment of the mic.
+        return await embed(clip, channel: 0, spans: [(0.4, Double(clip.seconds))])
+    }
+
+    func match(_ embedding: [Float], against voices: [Voice],
+               includingYou: Bool) -> (id: Int, distance: Float)? {
         let candidates: [(id: Int, distance: Float)] = voices.compactMap { voice in
-            guard voice.isNamed, !voice.isYou, let known = voice.embedding,
+            guard voice.isNamed, includingYou || !voice.isYou, let known = voice.embedding,
                   known.count == embedding.count
             else { return nil }
             return (voice.id, Self.cosineDistance(embedding, known))
@@ -71,48 +88,98 @@ final class VoiceRecognizer: ObservableObject {
            runnerUp.distance - best.distance < Self.requiredMargin {
             return nil
         }
-        return best.id
+        return best
+    }
+
+    func isConsistent(_ embedding: [Float], with voice: Voice) -> Bool {
+        guard let known = voice.embedding, known.count == embedding.count else { return true }
+        return Self.cosineDistance(embedding, known) <= Self.matchDistance
+    }
+
+    nonisolated static func normalized(_ vector: [Float]) -> [Float] {
+        let norm = vector.reduce(0) { $0 + $1 * $1 }.squareRoot()
+        return norm > 0 ? vector.map { $0 / norm } : vector
+    }
+
+    private func embed(_ clip: Clip, channel: Int, spans: [(from: TimeInterval, to: TimeInterval)]) async -> [Float]? {
+        guard await prepare(), let diarizer,
+              let samples = Self.voicedSamples(of: clip, channel: channel, spans: spans),
+              Double(samples.count) >= Self.minSeconds * Self.rate,
+              let embedding = try? diarizer.extractSpeakerEmbedding(from: samples),
+              embedding.contains(where: { $0 != 0 })
+        else { return nil }
+        return embedding
     }
 
     private static func cosineDistance(_ a: [Float], _ b: [Float]) -> Float {
-        var dot: Float = 0
-        for i in 0..<min(a.count, b.count) { dot += a[i] * b[i] }
-        return 1 - max(-1, min(1, dot))
+        var dot: Float = 0, aa: Float = 0, bb: Float = 0
+        for i in 0..<min(a.count, b.count) {
+            dot += a[i] * b[i]
+            aa += a[i] * a[i]
+            bb += b[i] * b[i]
+        }
+        guard aa > 0, bb > 0 else { return 2 }
+        return 1 - max(-1, min(1, dot / (aa.squareRoot() * bb.squareRoot())))
     }
 
-    private static func samples(forSpeaker speaker: Int, in clip: Clip) -> [Float]? {
+    private static func voicedSamples(of clip: Clip, channel: Int,
+                                      spans: [(from: TimeInterval, to: TimeInterval)]) -> [Float]? {
         let url = Persistence.shared.url(forAudio: clip.audioFileName)
         guard FileManager.default.fileExists(atPath: url.path),
-              let file = try? AVAudioFile(forReading: url), file.length > 0,
-              let turns = clip.turns
+              let file = try? AVAudioFile(forReading: url), file.length > 0
         else { return nil }
 
         let format = file.processingFormat
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format,
-                                            frameCapacity: AVAudioFrameCount(file.length)),
-              (try? file.read(into: buffer)) != nil,
-              let channels = buffer.floatChannelData
-        else { return nil }
-
-        let channelIndex = (speaker == Voice.youID || format.channelCount < 2) ? 0 : 1
-        let source = channels[min(channelIndex, Int(format.channelCount) - 1)]
-        let rate = format.sampleRate
-        let total = Int(buffer.frameLength)
+        let sourceRate = format.sampleRate
+        let source = min(channel, Int(format.channelCount) - 1)
+        let wanted = Int(maxSeconds * rate)
+        // Read only what can fill the window, even from an hour-long span.
+        let readCap = AVAudioFramePosition(maxSeconds * 3 * sourceRate)
 
         var out: [Float] = []
-        out.reserveCapacity(Int(maxSeconds * 16_000))
+        out.reserveCapacity(wanted)
+        for span in spans {
+            let start = AVAudioFramePosition(max(0, span.from) * sourceRate)
+            let end = min(file.length, start + readCap, AVAudioFramePosition(span.to * sourceRate))
+            let count = AVAudioFrameCount(max(0, end - start))
+            guard Double(count) >= 0.3 * sourceRate,
+                  let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count)
+            else { continue }
+            file.framePosition = start
+            guard (try? file.read(into: buffer, frameCount: count)) != nil,
+                  let data = buffer.floatChannelData
+            else { continue }
 
-        for (i, turn) in turns.enumerated() where turn.speaker == speaker {
-            let end = i + 1 < turns.count ? turns[i + 1].at : Double(clip.seconds)
-            let from = max(0, Int(turn.at * rate))
-            let to = min(total, Int(end * rate))
-            guard to > from else { continue }
-            out.append(contentsOf: UnsafeBufferPointer(start: source + from, count: to - from))
-            if Double(out.count) / rate >= maxSeconds { break }
+            var piece = Array(UnsafeBufferPointer(start: data[source], count: Int(buffer.frameLength)))
+            if sourceRate != rate { piece = resample(piece, from: sourceRate, to: rate) }
+            out.append(contentsOf: voiced(piece))
+            if out.count >= wanted { break }
         }
         guard !out.isEmpty else { return nil }
+        return Array(out.prefix(wanted))
+    }
 
-        return rate == 16_000 ? out : resample(out, from: rate, to: 16_000)
+    // Drops pauses, so the embedding describes the voice rather than the room.
+    private static func voiced(_ samples: [Float]) -> [Float] {
+        let frame = Int(rate * 0.02)
+        let frames = samples.count / frame
+        guard frames >= 5 else { return samples }
+
+        var energy = [Float](repeating: 0, count: frames)
+        for f in 0..<frames {
+            var sum: Float = 0
+            for i in (f * frame)..<((f + 1) * frame) { sum += samples[i] * samples[i] }
+            energy[f] = sum / Float(frame)
+        }
+        let loud = energy.sorted()[Int(Double(frames - 1) * 0.9)]
+        let floor = max(loud * 0.01, 1e-8)
+
+        var out: [Float] = []
+        out.reserveCapacity(samples.count)
+        for f in 0..<frames where energy[f] >= floor {
+            out.append(contentsOf: samples[(f * frame)..<((f + 1) * frame)])
+        }
+        return out
     }
 
     private static func resample(_ samples: [Float], from: Double, to: Double) -> [Float] {

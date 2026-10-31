@@ -7,7 +7,9 @@ struct Voice: Codable, Equatable, Identifiable {
     var name: String?
     var paletteIndex: Int
     var sampleFileName: String?
+    // Average of every confirmed sample of this voice; embeddingCount says how many.
     var embedding: [Float]?
+    var embeddingCount: Int?
 
     var isYou: Bool { id == Voice.youID }
     var isNamed: Bool { !(name ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
@@ -92,9 +94,22 @@ final class VoiceStore: ObservableObject {
         return id
     }
 
-    func setEmbedding(_ embedding: [Float], for id: Int) {
+    // Past this, new samples still count but can't swamp a settled profile.
+    private static let profileMemory = 20
+
+    func learn(_ embedding: [Float], for id: Int) {
         guard let idx = voices.firstIndex(where: { $0.id == id }) else { return }
-        voices[idx].embedding = embedding
+        let fresh = VoiceRecognizer.normalized(embedding)
+        let count = voices[idx].embeddingCount ?? 1
+        if let known = voices[idx].embedding, known.count == fresh.count {
+            let weight = Float(min(count, Self.profileMemory))
+            voices[idx].embedding = VoiceRecognizer.normalized(
+                zip(known, fresh).map { ($0 * weight + $1) / (weight + 1) })
+            voices[idx].embeddingCount = count + 1
+        } else {
+            voices[idx].embedding = fresh
+            voices[idx].embeddingCount = 1
+        }
         save()
     }
 
@@ -106,6 +121,7 @@ final class VoiceStore: ObservableObject {
         voices[idx].name = nil
         voices[idx].sampleFileName = nil
         voices[idx].embedding = nil
+        voices[idx].embeddingCount = nil
         save()
     }
 

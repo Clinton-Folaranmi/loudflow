@@ -17,6 +17,9 @@ final class AudioRecorder: NSObject {
     private var systemScratch: URL?
     private(set) var isRecording = false
 
+    private let clock = NSLock()
+    private var micStartHostTime: UInt64?
+
     private static let outputRate: Double = 16_000
 
     func start(to url: URL) throws {
@@ -42,9 +45,11 @@ final class AudioRecorder: NSObject {
         ])
         micFile = file
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+        clock.lock(); micStartHostTime = nil; clock.unlock()
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, when in
             guard let self, let f = self.micFile else { return }
-            try? f.write(from: buffer)
+            self.noteMicStart(when)
+            try? f.write(from: Self.mono(buffer, as: f.processingFormat))
         }
 
         engine.prepare()
@@ -77,9 +82,13 @@ final class AudioRecorder: NSObject {
         micFile = nil
 
         var systemTrack: URL?
+        var systemDelay: TimeInterval = 0
         if #available(macOS 14.2, *), let tap = system as? SystemAudioTap {
             tap.stop()
-            if tap.capturedAnything { systemTrack = systemScratch }
+            if tap.capturedAnything {
+                systemTrack = systemScratch
+                systemDelay = delay(of: tap.startHostTime)
+            }
         }
         system = nil
 
@@ -88,7 +97,7 @@ final class AudioRecorder: NSObject {
             return Outcome(duration: duration, twoTrack: false)
         }
 
-        let twoTrack = Self.encode(mic: mic, system: systemTrack, to: target)
+        let twoTrack = Self.encode(mic: mic, system: systemTrack, systemDelay: systemDelay, to: target)
         return Outcome(duration: duration, twoTrack: twoTrack)
     }
 
@@ -115,14 +124,48 @@ final class AudioRecorder: NSObject {
         startedAt = nil
     }
 
-    private static func encode(mic: URL, system: URL?, to target: URL) -> Bool {
+    private func noteMicStart(_ when: AVAudioTime) {
+        guard when.isHostTimeValid else { return }
+        clock.lock()
+        if micStartHostTime == nil { micStartHostTime = when.hostTime }
+        clock.unlock()
+    }
+
+    // The system tap starts a beat after the mic. Without this, the far side's words land early.
+    private func delay(of systemStart: UInt64?) -> TimeInterval {
+        clock.lock(); let micStart = micStartHostTime; clock.unlock()
+        guard let micStart, let systemStart else { return 0 }
+        let delay = AVAudioTime.seconds(forHostTime: systemStart) - AVAudioTime.seconds(forHostTime: micStart)
+        return max(-2, min(2, delay))
+    }
+
+    // A file opened as mono rejects multi-channel buffers, which left interface mics silent.
+    private static func mono(_ buffer: AVAudioPCMBuffer, as format: AVAudioFormat) -> AVAudioPCMBuffer {
+        let channels = Int(buffer.format.channelCount)
+        guard channels > 1, let source = buffer.floatChannelData,
+              let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: buffer.frameLength),
+              let target = out.floatChannelData?[0]
+        else { return buffer }
+        out.frameLength = buffer.frameLength
+        let scale = 1 / Float(channels)
+        for i in 0..<Int(buffer.frameLength) {
+            var sum: Float = 0
+            for c in 0..<channels { sum += source[c][i] }
+            target[i] = sum * scale
+        }
+        return out
+    }
+
+    private static func encode(mic: URL, system: URL?, systemDelay: TimeInterval, to target: URL) -> Bool {
         guard let monoFormat = AVAudioFormat(standardFormatWithSampleRate: outputRate, channels: 1),
               let micSamples = resampled(mic, to: monoFormat)
         else { return false }
 
         let systemSamples = system.flatMap { resampled($0, to: monoFormat) }
         let channels: AVAudioChannelCount = systemSamples == nil ? 1 : 2
-        let frames = max(micSamples.frameLength, systemSamples?.frameLength ?? 0)
+        let shift = Int((systemDelay * outputRate).rounded())
+        let systemEnd = systemSamples.map { max(0, Int($0.frameLength) + shift) } ?? 0
+        let frames = max(micSamples.frameLength, AVAudioFrameCount(systemEnd))
         guard frames > 0 else { return false }
 
         let settings: [String: Any] = [
@@ -138,22 +181,26 @@ final class AudioRecorder: NSObject {
         else { return false }
 
         buffer.frameLength = frames
-        copy(micSamples, into: data[0], frames: frames)
+        copy(micSamples, into: data[0], frames: frames, shift: 0)
         if channels == 2, let systemSamples {
-            copy(systemSamples, into: data[1], frames: frames)
+            copy(systemSamples, into: data[1], frames: frames, shift: shift)
         }
 
         guard (try? out.write(from: buffer)) != nil else { return false }
         return channels == 2
     }
 
+    // A positive shift delays the source; a negative one drops its first frames.
     private static func copy(_ source: AVAudioPCMBuffer, into destination: UnsafeMutablePointer<Float>,
-                             frames: AVAudioFrameCount) {
-        let available = Int(min(source.frameLength, frames))
-        if let src = source.floatChannelData?[0] {
-            destination.update(from: src, count: available)
-        }
-        for i in available..<Int(frames) { destination[i] = 0 }
+                             frames: AVAudioFrameCount, shift: Int) {
+        let total = Int(frames)
+        destination.update(repeating: 0, count: total)
+        guard let src = source.floatChannelData?[0] else { return }
+        let skip = max(0, -shift)
+        let offset = max(0, shift)
+        let count = min(Int(source.frameLength) - skip, total - offset)
+        guard count > 0 else { return }
+        (destination + offset).update(from: src + skip, count: count)
     }
 
     private static func resampled(_ url: URL, to format: AVAudioFormat) -> AVAudioPCMBuffer? {

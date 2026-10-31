@@ -19,7 +19,6 @@ struct SettingsView: View {
             toggleCard
             retentionCard
             speakersCard
-            vocabularyCard
             transcriptionCard
         }
     }
@@ -113,7 +112,7 @@ struct SettingsView: View {
                 SolarIcon(name: Solar.speakers, size: 18, color: Theme.marigoldInk)
                 Text("Speakers").font(Typo.font(15, 800)).foregroundColor(Theme.creamInk)
             }
-            Text("When a recording has more than one voice, LoudFlow labels each one. A voice you've named that turns up again is offered as a suggestion on the transcript, not applied on its own. Fixing a name from a transcript only changes that recording; renaming a voice here changes every recording it's in.")
+            Text("When a recording has more than one voice, LoudFlow labels each one. A voice you've named that turns up again is offered as a suggestion on the transcript, not applied on its own. Your own voice is learned from your solo recordings, so LoudFlow can point you out in a meeting too. Fixing a name from a transcript only changes that recording; renaming a voice here changes every recording it's in.")
                 .font(Typo.font(12.5, 400))
                 .foregroundColor(Theme.creamBody)
                 .lineSpacing(12.5 * 0.45)
@@ -148,97 +147,11 @@ struct SettingsView: View {
         case .unavailable:
             return "Couldn't fetch the voice model, so voices won't be recognised on their own yet. Naming one still works."
         case .idle, .ready:
-            return "Matching a voice to one you've named runs on this Mac. The model it needs downloads once, the first time you name someone."
+            return "Matching voices runs on this Mac. The model it needs downloads once, the first time a recording has more than one voice or you name someone."
         }
-    }
-
-    private var vocabularyCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 9) {
-                SolarIcon(name: Solar.textField, size: 18, color: Theme.marigoldInk)
-                Text("Vocabulary").font(Typo.font(15, 800)).foregroundColor(Theme.creamInk)
-            }
-            Text("Add names, jargon, or spellings the transcriber keeps getting wrong. A voice you've named counts too, without retyping it here.")
-                .font(Typo.font(12.5, 400))
-                .foregroundColor(Theme.creamBody)
-                .lineSpacing(12.5 * 0.45)
-                .fixedSize(horizontal: false, vertical: true)
-
-            FlowLayout(spacing: 7) {
-                ForEach(model.vocabulary, id: \.self) { term in
-                    TermPill(term: term) { model.removeTerm(term) }
-                }
-                AddTermField { model.addTerm($0) }
-            }
-            .animation(reduceMotion ? nil : Motion.page, value: model.vocabulary)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Theme.Radius.cardSmall).fill(Theme.cream))
     }
 
     private var transcriptionCard: some View { TranscriptionCard(model: model) }
-}
-
-// MARK: - Vocabulary pills
-
-private struct TermPill: View {
-    let term: String
-    let remove: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Text(term)
-                .font(Typo.font(13, 700))
-                .foregroundColor(Theme.creamInk)
-                .padding(.horizontal, 2)
-            Button(action: remove) {
-                ZStack {
-                    Circle().fill(hovering ? Theme.marigold : Theme.creamChip)
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundColor(Theme.marigoldInk)
-                }
-                .frame(width: 18, height: 18)
-                .frame(width: 28, height: 28)
-            }
-            .buttonStyle(PressFeedbackStyle())
-            .clickable()
-            .onHover { hovering = $0 }
-            .help("Remove \(term)")
-        }
-        .padding(5)
-        .background(Capsule().fill(Theme.card))
-        .overlay(Capsule().stroke(Theme.creamLine2, lineWidth: 1.5))
-    }
-}
-
-private struct AddTermField: View {
-    let add: (String) -> Void
-    @State private var draft = ""
-    @FocusState private var focused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        TextField("Add a term", text: $draft)
-            .textFieldStyle(.plain)
-            .font(Typo.font(13, 700))
-            .foregroundColor(Theme.creamInk)
-            .focused($focused)
-            .frame(width: 120)
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(Capsule().fill(Theme.card))
-            .overlay(Capsule().stroke(focused ? Theme.marigold : Theme.creamLine, lineWidth: 1.5))
-            .animation(reduceMotion ? nil : Motion.feedback, value: focused)
-            .onSubmit {
-                let trimmed = draft.trimmingCharacters(in: .whitespaces)
-                guard !trimmed.isEmpty else { return }
-                add(trimmed)
-                draft = ""
-                focused = true
-            }
-    }
 }
 
 // MARK: - Voice pill

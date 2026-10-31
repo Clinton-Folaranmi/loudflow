@@ -7,6 +7,51 @@ two stay in step.
 Each release names the **design version** it implements. That number is also compiled into the
 build as `DesignVersion.current` and shown in the sidebar footer.
 
+## 1.7.0 — 2026-10-31 — design 5
+
+Transcription accuracy and speaker identification. Not a design update.
+
+### Changed
+
+- **Deepgram moves from Nova-2 to Nova-3**, and diarization from `diarize=true` (which Deepgram
+  pins to its v1 diarizer) to `diarize_model=latest`. If Deepgram rejects that parameter, the
+  request is retried once with `diarize=true`.
+- **OpenAI moves from `whisper-1` to `gpt-transcribe`.** `whisper-1` is deprecated and shuts down
+  on 2027-02-26; it is only used now if a key can't use `gpt-transcribe`. The provider is labelled
+  "OpenAI" rather than "OpenAI Whisper".
+- **Speaker turns are cleaned up before they're shown.** A word or two of one sentence that the
+  diarizer hands to another voice goes back to the voice around it, and a voice that appears for
+  a word or two in a recording only one person spoke in is folded in, so a dictation no longer
+  turns into a two-voice "meeting".
+- **Two-track recordings drop the call's echo.** Without headphones the mic also hears the far
+  side, so their words appeared twice, the second copy as you. Mic words that match the far side
+  at the same moment are removed. Turns also interleave sentence by sentence instead of one long
+  block per side.
+- **Voice profiles average every confirmed sample** instead of keeping only the clip a voice was
+  first named in. Naming a speaker, accepting a suggestion, or picking a named voice from the pen
+  menu all count.
+- **LoudFlow learns your voice** from your solo recordings (once a meeting has been recorded), so
+  in a mic-only meeting it can suggest which "Speaker" is you. Suggestions stay suggestions.
+- **Voice matching reads only what it needs.** It used to decode a whole recording into memory
+  per speaker (about 330 MB per channel for an hour and a half); it now reads at most 30 s, skips
+  pauses, and picks the speaker's longest turns, up to the 10 s the embedder actually hears.
+- Turns store where their last word ends, for better voice samples and playback.
+
+### Removed
+
+- **The Vocabulary card.** Its terms went to Deepgram as `keywords` and to Whisper as a `prompt`;
+  boosting can insert the boosted words where they weren't said. Saved terms are cleared.
+
+### Fixed
+
+- **Recording from a multi-channel input (USB mics, audio interfaces) produced silence.** The mic
+  file is mono and rejected stereo buffers; input is now mixed down first.
+- **The far side of a call was shifted early.** The system-audio track starts a beat after the
+  mic; the two are now aligned on their start times.
+- **A recording over OpenAI's 25 MB limit retried forever.** It now fails with a clear message.
+  Uploads also allow 10 minutes before timing out, so long meetings aren't cut off.
+- Voice matching no longer assumes the embedder returns unit-length vectors.
+
 ## 1.6.1 — 2026-10-09 — design 5
 
 ### Interaction refinement

@@ -12,7 +12,7 @@ enum Preferences {
         static let onboarded = "onboarded"
         static let wordsToday = "wordsToday"
         static let wordsTodayDay = "wordsTodayDay"
-        static let vocabulary = "vocabulary"
+        static let retiredVocabulary = "vocabulary"
         static let playbackRate = "playbackRate"
     }
 
@@ -79,9 +79,8 @@ enum Preferences {
     }()
     private static var todayStamp: String { dayStampFormatter.string(from: Date()) }
 
-    static var vocabulary: [String] {
-        get { d.stringArray(forKey: Key.vocabulary) ?? [] }
-        set { d.set(newValue, forKey: Key.vocabulary) }
+    static func removeRetiredKeys() {
+        d.removeObject(forKey: Key.retiredVocabulary)
     }
 
     static var playbackRate: Float {

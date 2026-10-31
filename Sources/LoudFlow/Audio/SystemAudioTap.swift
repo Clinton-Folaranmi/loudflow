@@ -19,6 +19,12 @@ final class SystemAudioTap {
         return peakValue > 0.004
     }
 
+    private var firstHostTime: UInt64?
+    var startHostTime: UInt64? {
+        lock.lock(); defer { lock.unlock() }
+        return firstHostTime
+    }
+
     private static let log = Logger(subsystem: "com.loudflow.app", category: "SystemAudioTap")
 
     func start(to url: URL) -> Bool {
@@ -66,8 +72,8 @@ final class SystemAudioTap {
 
             var proc: AudioDeviceIOProcID?
             let status = AudioDeviceCreateIOProcIDWithBlock(&proc, aggregate_id, nil) {
-                [weak self] _, input, _, _, _ in
-                self?.receive(input, format: avFormat)
+                [weak self] _, input, inputTime, _, _ in
+                self?.receive(input, at: inputTime.pointee, format: avFormat)
             }
             guard status == noErr, let proc else { throw TapError.noIOProc }
             procID = proc
@@ -82,8 +88,13 @@ final class SystemAudioTap {
         }
     }
 
-    private func receive(_ input: UnsafePointer<AudioBufferList>, format: AVAudioFormat) {
+    private func receive(_ input: UnsafePointer<AudioBufferList>, at time: AudioTimeStamp, format: AVAudioFormat) {
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: input) else { return }
+        if time.mFlags.contains(.hostTimeValid) {
+            lock.lock()
+            if firstHostTime == nil { firstHostTime = time.mHostTime }
+            lock.unlock()
+        }
 
         if let channel = buffer.floatChannelData?[0] {
             var peak: Float = 0
