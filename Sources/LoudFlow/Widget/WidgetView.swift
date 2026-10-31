@@ -32,11 +32,11 @@ struct WidgetView: View {
         .padding(shadowPad)
         .fixedSize()
         .animation(reduceMotion ? nil : Motion.feedback, value: model.toast)
-        .onChange(of: hovering) { _ in onLayoutChanged?() }
-        .onChange(of: model.widgetState) { _ in onLayoutChanged?() }
-        .onChange(of: model.toast) { _ in onLayoutChanged?() }
-        .onChange(of: model.trigger) { _ in onLayoutChanged?() }
-        .onChange(of: model.elapsed) { _ in onLayoutChanged?() }
+        .onChange(of: hovering) { onLayoutChanged?() }
+        .onChange(of: model.widgetState) { onLayoutChanged?() }
+        .onChange(of: model.toast) { onLayoutChanged?() }
+        .onChange(of: model.trigger) { onLayoutChanged?() }
+        .onChange(of: model.elapsed) { onLayoutChanged?() }
     }
 
     private var dragGesture: some Gesture {

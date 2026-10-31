@@ -10,9 +10,12 @@ options:
 settings:
   base:
     # Semantic version MAJOR.MINOR.PATCH. Bump MINOR per feature batch, PATCH per fix.
-    MARKETING_VERSION: "1.7.0"
-    CURRENT_PROJECT_VERSION: "14"
+    MARKETING_VERSION: "1.7.1"
+    CURRENT_PROJECT_VERSION: "15"
     SWIFT_VERSION: "5.9"
+    # Apple silicon only. Every build so far has been arm64, and FluidAudio's speech models use
+    # Float16, which doesn't exist on Intel Macs.
+    ARCHS: arm64
     DEVELOPMENT_LANGUAGE: en
     # Personal/local build: ad-hoc "Sign to Run Locally". Set your own team in Xcode if you
     # notarize. Accessibility permission is tied to the signature, so with ad-hoc signing you
@@ -49,6 +52,9 @@ targets:
         type: folder
     dependencies:
       - package: FluidAudio
+    scheme:
+      testTargets:
+        - LoudFlowTests
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.loudflow.app
@@ -56,3 +62,22 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Resources/LoudFlow.entitlements
         COMBINE_HIDPI_IMAGES: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  LoudFlowTests:
+    type: bundle.unit-test
+    platform: macOS
+    # The transcription logic only needs Foundation, so the tests compile it directly rather than
+    # launching the app, which would open your real library.
+    sources:
+      - path: Tests/LoudFlowTests
+      - path: Sources/LoudFlow/Transcription/Turn.swift
+      - path: Sources/LoudFlow/Transcription/TurnBuilder.swift
+      - path: Sources/LoudFlow/Transcription/Transcriber.swift
+      - path: Sources/LoudFlow/Transcription/DeepgramTranscriber.swift
+      - path: Sources/LoudFlow/Transcription/WhisperTranscriber.swift
+      - path: Sources/LoudFlow/Transcription/Provider.swift
+      - path: Sources/LoudFlow/App/Keychain.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.loudflow.tests
+        GENERATE_INFOPLIST_FILE: YES

@@ -82,25 +82,6 @@ enum Retention: String, CaseIterable, Codable {
     }
 }
 
-// MARK: - Provider
-
-enum Provider: String, CaseIterable, Codable {
-    case deepgram, whisper
-    var displayName: String {
-        switch self {
-        case .deepgram: return "Deepgram"
-        case .whisper:  return "OpenAI"
-        }
-    }
-
-    var keyURL: URL {
-        switch self {
-        case .deepgram: return URL(string: "https://console.deepgram.com/signup")!
-        case .whisper:  return URL(string: "https://platform.openai.com/api-keys")!
-        }
-    }
-}
-
 // MARK: - Options (the two settings toggles)
 
 struct DictationOptions: Codable, Equatable {

@@ -13,7 +13,7 @@ enum TextInserter {
         }
 
         let pb = NSPasteboard.general
-        let previous = pb.string(forType: .string)
+        let previous = snapshot(pb)
         pb.clearContents()
         pb.setString(text, forType: .string)
         let transcriptChangeCount = pb.changeCount
@@ -23,7 +23,7 @@ enum TextInserter {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 guard pb.changeCount == transcriptChangeCount else { return }
                 pb.clearContents()
-                if let previous { pb.setString(previous, forType: .string) }
+                if !previous.isEmpty { pb.writeObjects(previous) }
             }
         }
 
@@ -39,6 +39,17 @@ enum TextInserter {
             restore()
         }
         return true
+    }
+
+    // Every item and type on the clipboard, so an image or file copied earlier survives a paste.
+    private static func snapshot(_ pb: NSPasteboard) -> [NSPasteboardItem] {
+        (pb.pasteboardItems ?? []).compactMap { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) { copy.setData(data, forType: type) }
+            }
+            return copy.types.isEmpty ? nil : copy
+        }
     }
 
     static func copyToClipboard(_ text: String) {

@@ -1,13 +1,5 @@
 import Foundation
 
-struct Turn: Codable, Equatable {
-    var speaker: Int
-    var at: TimeInterval
-    var text: String
-    // Where the last word ends. Older clips don't have it.
-    var end: TimeInterval? = nil
-}
-
 struct Clip: Identifiable, Codable, Equatable {
     let id: UUID
     var createdAt: Date
@@ -20,6 +12,8 @@ struct Clip: Identifiable, Codable, Equatable {
     var turns: [Turn]? = nil
     var audioFileName: String
     var twoTrack: Bool = false
+    // Another app was playing during the recording, but the call track stayed silent.
+    var callAudioMissed: Bool? = nil
     var audioDeleted: Bool = false
     var status: Status = .done
 

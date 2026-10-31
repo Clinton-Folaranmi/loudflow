@@ -131,7 +131,7 @@ private struct DayColumn: View {
         .buttonStyle(.plain)
         .focused($focused)
         .onHover(perform: onHover)
-        .onChange(of: focused) { onFocus($0) }
+        .onChange(of: focused) { _, isFocused in onFocus(isFocused) }
         .animation(reduceMotion ? nil : Motion.feedback, value: showing)
         .accessibilityLabel("\(day.label), \(day.words) words, \(day.recordingsLine), \(day.minutesSaved(typingWPM: typingWPM)) minutes of typing avoided")
         .accessibilityHint("Show this day's details")

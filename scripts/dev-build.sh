@@ -21,7 +21,7 @@ xcodegen generate >/dev/null
 
 echo "==> Building (Release)…"
 xcodebuild -project LoudFlow.xcodeproj -scheme LoudFlow -configuration Release \
-  -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO build >/tmp/lf_build.log 2>&1 \
+  -derivedDataPath build/dd ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build >/tmp/lf_build.log 2>&1 \
   || { echo "BUILD FAILED:"; tail -30 /tmp/lf_build.log; exit 1; }
 
 # Keep one code identity across builds so macOS can keep the Accessibility grant.

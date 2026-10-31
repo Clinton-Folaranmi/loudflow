@@ -6,6 +6,8 @@ final class AudioRecorder: NSObject {
     struct Outcome {
         let duration: TimeInterval
         let twoTrack: Bool
+        // Another app played audio, but none of it reached the call track.
+        var callAudioMissed = false
     }
 
     private let engine = AVAudioEngine()
@@ -19,6 +21,7 @@ final class AudioRecorder: NSObject {
 
     private let clock = NSLock()
     private var micStartHostTime: UInt64?
+    private var othersPlayedAudio = false
 
     private static let outputRate: Double = 16_000
 
@@ -66,6 +69,7 @@ final class AudioRecorder: NSObject {
         isRecording = true
 
         if #available(macOS 14.2, *) {
+            othersPlayedAudio = SystemAudioTap.othersArePlaying()
             let tap = SystemAudioTap()
 
             system = tap.start(to: sys) ? tap : nil
@@ -83,12 +87,17 @@ final class AudioRecorder: NSObject {
 
         var systemTrack: URL?
         var systemDelay: TimeInterval = 0
-        if #available(macOS 14.2, *), let tap = system as? SystemAudioTap {
-            tap.stop()
-            if tap.capturedAnything {
-                systemTrack = systemScratch
-                systemDelay = delay(of: tap.startHostTime)
+        var callAudioMissed = false
+        if #available(macOS 14.2, *) {
+            let othersPlayed = othersPlayedAudio || SystemAudioTap.othersArePlaying()
+            if let tap = system as? SystemAudioTap {
+                tap.stop()
+                if tap.capturedAnything {
+                    systemTrack = systemScratch
+                    systemDelay = delay(of: tap.startHostTime)
+                }
             }
+            callAudioMissed = othersPlayed && systemTrack == nil
         }
         system = nil
 
@@ -98,7 +107,7 @@ final class AudioRecorder: NSObject {
         }
 
         let twoTrack = Self.encode(mic: mic, system: systemTrack, systemDelay: systemDelay, to: target)
-        return Outcome(duration: duration, twoTrack: twoTrack)
+        return Outcome(duration: duration, twoTrack: twoTrack, callAudioMissed: callAudioMissed && !twoTrack)
     }
 
     func cancel() {

@@ -158,8 +158,10 @@ final class VoiceStore: ObservableObject {
         export.outputFileType = .m4a
         let from = CMTime(seconds: max(0, start), preferredTimescale: 600)
         export.timeRange = CMTimeRange(start: from, duration: CMTime(seconds: 2, preferredTimescale: 600))
-        export.exportAsynchronously { [weak self] in
-            guard export.status == .completed else { return }
+        // The session is only read again in its own completion handler.
+        nonisolated(unsafe) let session = export
+        session.exportAsynchronously { [weak self] in
+            guard session.status == .completed else { return }
             Task { @MainActor in
                 guard let self, let idx = self.voices.firstIndex(where: { $0.id == id }) else { return }
                 self.voices[idx].sampleFileName = fileName

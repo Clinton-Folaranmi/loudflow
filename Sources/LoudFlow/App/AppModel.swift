@@ -47,7 +47,7 @@ final class AppModel: ObservableObject {
     @Published var clips: [Clip]
     @Published var selectedId: UUID?
     @Published var playingId: UUID?
-    @Published var progressByClip: [UUID: Double] = [:]
+    let playback = PlaybackProgress()
     @Published var libraryFilter: LibraryFilter = .all
     @Published var librarySearch = ""
     @Published var playbackRate: Float { didSet { Preferences.playbackRate = playbackRate; player.setRate(playbackRate) } }
@@ -103,6 +103,7 @@ final class AppModel: ObservableObject {
         self.playbackRate = Preferences.playbackRate
         self.transcriber = TranscriberFactory.make(provider: prov)
         self.selectedId = clips.first?.id
+        loadSuggestions()
 
         voices.rename(Voice.youID, to: userFirstName)
         Preferences.removeRetiredKeys()
@@ -111,6 +112,8 @@ final class AppModel: ObservableObject {
         wireUp()
         sweepRetention()
         pruneVoices()
+        Persistence.shared.removeScratchRecordings()
+        refreshStorage()
     }
 
     private func wireUp() {
@@ -119,7 +122,7 @@ final class AppModel: ObservableObject {
 
         player.onProgress = { [weak self] p in
             guard let self, let id = self.playingId else { return }
-            self.progressByClip[id] = p
+            self.playback.set(p, for: id)
         }
         player.onFinish = { [weak self] in self?.playingId = nil }
 
@@ -231,11 +234,13 @@ final class AppModel: ObservableObject {
         let secs = max(1, Int(outcome.duration.rounded()))
         let size = Persistence.shared.fileSize(fileName: audio.fileName)
 
-        let clip = Clip(createdAt: Date(), seconds: secs, sizeBytes: size,
+        var clip = Clip(createdAt: Date(), seconds: secs, sizeBytes: size,
                         text: "", audioFileName: audio.fileName,
                         twoTrack: outcome.twoTrack, status: .pending)
+        if outcome.callAudioMissed { clip.callAudioMissed = true }
         clips.insert(clip, at: 0)
         persist()
+        refreshStorage()
 
         guard hasKey else {
             widgetState = .error(.missingKey)
@@ -268,7 +273,7 @@ final class AppModel: ObservableObject {
         applyTranscript(result, toClipAt: idx)
         clips[idx].status = .done
         persist()
-        recogniseVoices(inClip: clipID)
+        let voiceWork = recogniseVoices(inClip: clipID)
 
         let text = clips[idx].text
         Earcons.transcriptLanded()
@@ -287,10 +292,12 @@ final class AppModel: ObservableObject {
             TextInserter.copyToClipboard(text)
         }
 
+        // Voice learning reads the audio, so it's cleared once that's done.
         if !options.keep {
-            Persistence.shared.deleteAudio(fileName: clips[idx].audioFileName)
-            clips[idx].audioDeleted = true
-            persist()
+            Task { [weak self] in
+                await voiceWork?.value
+                self?.clearAudio(of: clipID)
+            }
         }
 
         selectedId = clipID
@@ -301,6 +308,8 @@ final class AppModel: ObservableObject {
             message = "Transcription was empty."
         } else if options.insert && !didType {
             message = Permissions.pastePermissionMessage
+        } else if clips[idx].isConversation && clips[idx].callAudioMissed == true {
+            message = "Call audio wasn't recorded. The clip in Library says how to fix it."
         } else {
             message = options.insert ? "Recording pasted." : "Copied."
         }
@@ -346,6 +355,15 @@ final class AppModel: ObservableObject {
         case .credit:     widgetState = .error(.outOfCredit)
         case .tooLarge:   widgetState = .error(.tooLarge)
         }
+    }
+
+    private func clearAudio(of clipID: UUID) {
+        guard let idx = clips.firstIndex(where: { $0.id == clipID }), !clips[idx].audioDeleted else { return }
+        if playingId == clipID { player.stop(); playingId = nil }
+        Persistence.shared.deleteAudio(fileName: clips[idx].audioFileName)
+        clips[idx].audioDeleted = true
+        persist()
+        refreshStorage()
     }
 
     private var tooLargeMessage: String {
@@ -404,11 +422,12 @@ final class AppModel: ObservableObject {
         clips[idx].text = clips[idx].flattenedTurns
     }
 
-    private func recogniseVoices(inClip id: UUID) {
-        guard let clip = clips.first(where: { $0.id == id }), !clip.audioDeleted else { return }
-        guard clip.isConversation else { learnYourVoice(fromSolo: clip); return }
+    @discardableResult
+    private func recogniseVoices(inClip id: UUID) -> Task<Void, Never>? {
+        guard let clip = clips.first(where: { $0.id == id }), !clip.audioDeleted else { return nil }
+        guard clip.isConversation else { return learnYourVoice(fromSolo: clip) }
 
-        Task { [weak self] in
+        return Task { [weak self] in
             guard let self else { return }
             if clip.twoTrack, clip.speakerIds.contains(Voice.youID) {
                 await self.reinforce(Voice.youID, in: id, confirmed: false)
@@ -459,12 +478,12 @@ final class AppModel: ObservableObject {
     // Solo dictation is almost always you, so it teaches LoudFlow your voice for meetings.
     private static let soloSamplesWanted = 12
 
-    private func learnYourVoice(fromSolo clip: Clip) {
+    private func learnYourVoice(fromSolo clip: Clip) -> Task<Void, Never>? {
         guard let you = voices.voice(Voice.youID),
               (you.embeddingCount ?? 0) < Self.soloSamplesWanted,
               you.embedding != nil || clips.contains(where: \.isConversation)
-        else { return }
-        Task { [weak self] in
+        else { return nil }
+        return Task { [weak self] in
             guard let self,
                   let current = self.clips.first(where: { $0.id == clip.id }),
                   let embedding = await self.recognizer.embedding(ofSoloClip: current)
@@ -534,7 +553,7 @@ final class AppModel: ObservableObject {
     }
     private func clearErrorToast() { if case .error = widgetState { widgetState = .idle } }
 
-    func progress(for id: UUID) -> Double { progressByClip[id] ?? 0 }
+    func progress(for id: UUID) -> Double { playback.fraction(for: id) }
 
     func play(_ clip: Clip) {
         if playingId == clip.id { player.pause(); playingId = nil; return }
@@ -550,7 +569,7 @@ final class AppModel: ObservableObject {
 
     func seek(_ clip: Clip, to fraction: Double) {
         let f = max(0, min(1, fraction))
-        progressByClip[clip.id] = f
+        playback.set(f, for: clip.id)
         if playingId == clip.id { player.seek(to: f) }
     }
 
@@ -560,7 +579,7 @@ final class AppModel: ObservableObject {
         if playingId == clip.id {
             seek(clip, to: f)
         } else {
-            progressByClip[clip.id] = f
+            playback.set(f, for: clip.id)
             play(clip)
         }
     }
@@ -626,6 +645,7 @@ final class AppModel: ObservableObject {
         for i in turns.indices where turns[i].speaker == speaker { turns[i].speaker = voice }
         clips[idx].turns = turns
         clips[idx].text = clips[idx].flattenedTurns
+        suggestions[clipID]?[speaker] = nil
         persist()
         pruneVoices()
         // Picking a named voice confirms it, so this recording sharpens that voice's profile.
@@ -643,6 +663,7 @@ final class AppModel: ObservableObject {
         for i in turns.indices where turns[i].speaker == speaker { turns[i].speaker = fresh }
         clips[idx].turns = turns
         clips[idx].text = clips[idx].flattenedTurns
+        suggestions[clipID]?[speaker] = nil
         persist()
         pruneVoices()
         return fresh
@@ -657,6 +678,7 @@ final class AppModel: ObservableObject {
             return
         }
 
+        suggestions[clipID]?[speaker] = nil
         let sharedElsewhere = clips.contains { c in
             c.id != clipID && (c.turns ?? []).contains { $0.speaker == speaker }
         }
@@ -673,9 +695,30 @@ final class AppModel: ObservableObject {
         scheduleToastDismiss()
     }
 
-    @Published var suggestions: [UUID: [Int: Int]] = [:]
+    @Published var suggestions: [UUID: [Int: Int]] = [:] { didSet { saveSuggestions() } }
 
-    private var rejectedSuggestions: Set<String> = []
+    private var rejectedSuggestions: Set<String> = [] { didSet { saveSuggestions() } }
+
+    private func loadSuggestions() {
+        let saved = Persistence.shared.loadSuggestions()
+        let known = Set(clips.map(\.id))
+        var loaded: [UUID: [Int: Int]] = [:]
+        for (key, bySpeaker) in saved.suggestions {
+            guard let id = UUID(uuidString: key), known.contains(id) else { continue }
+            loaded[id] = Dictionary(uniqueKeysWithValues: bySpeaker.compactMap { speaker, voice in
+                Int(speaker).map { ($0, voice) }
+            })
+        }
+        suggestions = loaded
+        rejectedSuggestions = Set(saved.rejected)
+    }
+
+    private func saveSuggestions() {
+        let byClip = Dictionary(uniqueKeysWithValues: suggestions.compactMap { id, bySpeaker in
+            bySpeaker.isEmpty ? nil : (id.uuidString, Dictionary(uniqueKeysWithValues: bySpeaker.map { (String($0), $1) }))
+        })
+        Persistence.shared.saveSuggestions(.init(suggestions: byClip, rejected: rejectedSuggestions.sorted()))
+    }
 
     private static func suggestionKey(_ clipID: UUID, _ speaker: Int) -> String { "\(clipID):\(speaker)" }
 
@@ -776,7 +819,8 @@ final class AppModel: ObservableObject {
         if playingId == id { player.stop(); playingId = nil }
         Persistence.shared.deleteAudio(fileName: clip.audioFileName)
         clips.remove(at: idx)
-        progressByClip[id] = nil
+        refreshStorage()
+        playback.clear(id)
         suggestions[id] = nil
         editingTranscript = false
         selectedId = filteredClips.first?.id
@@ -815,7 +859,7 @@ final class AppModel: ObservableObject {
             clips[i].audioDeleted = true
             changed = true
         }
-        if changed { persist() }
+        if changed { persist(); refreshStorage() }
     }
 
     var systemFirstName: String {
@@ -836,9 +880,28 @@ final class AppModel: ObservableObject {
     }
     var subline: String { "\(todayClips.count) recordings today." }
 
-    var totalMB: Double { Double(Persistence.shared.totalAudioBytes()) / 1_000_000 }
-    var storageFraction: Double { min(1.0, totalMB / 12) }
-    var storageLabel: String { String(format: "%.1f MB · %d clips", totalMB, clips.count) }
+    @Published private(set) var audioBytes: Int64 = 0
+    private var freeBytes: Int64 = 0
+
+    // Measured when audio is added or removed, never during a redraw.
+    func refreshStorage() {
+        audioBytes = Persistence.shared.totalAudioBytes()
+        freeBytes = Persistence.shared.availableBytes()
+    }
+
+    var totalMB: Double { Double(audioBytes) / 1_000_000 }
+
+    // The share of this Mac's remaining space that recordings take up. A sliver stays
+    // visible so the meter doesn't read as empty.
+    var storageFraction: Double {
+        guard audioBytes > 0 else { return 0 }
+        let share = Double(audioBytes) / Double(audioBytes + max(0, freeBytes))
+        return min(1, max(0.02, share))
+    }
+
+    var storageLabel: String {
+        "\(ByteCountFormatter.string(fromByteCount: audioBytes, countStyle: .file)) · \(clips.count) clips"
+    }
 
     var wordsToday: Int { todayClips.reduce(0) { $0 + $1.wordCount } }
 

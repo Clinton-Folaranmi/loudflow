@@ -134,6 +134,37 @@ final class SystemAudioTap {
         case noDefaultOutput, noDeviceUID, badFormat, noAggregateDevice, noIOProc, couldNotStart
     }
 
+    // Whether another app is sending audio out, which is how a call shows up.
+    static func othersArePlaying() -> Bool {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, size > 0 else { return false }
+        var objects = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &objects) == noErr else { return false }
+
+        let me = getpid()
+        return objects.contains { object in
+            var pid: pid_t = 0
+            var running: UInt32 = 0
+            return read(object, kAudioProcessPropertyPID, into: &pid) && pid != me
+                && read(object, kAudioProcessPropertyIsRunningOutput, into: &running) && running != 0
+        }
+    }
+
+    private static func read<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
+                                into value: inout T) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var size = UInt32(MemoryLayout<T>.size)
+        return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr
+    }
+
     private static func defaultOutputDevice() throws -> AudioObjectID {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,

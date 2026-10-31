@@ -7,6 +7,46 @@ two stay in step.
 Each release names the **design version** it implements. That number is also compiled into the
 build as `DesignVersion.current` and shown in the sidebar footer.
 
+## 1.7.1 — 2026-10-31 — design 5
+
+Fixes from the platform audit. Not a design update.
+
+### Fixed
+
+- **Playback no longer redraws the whole window 30 times a second.** The playhead moved into
+  its own small object, so only the scrubber follows it, and the transcript redraws only when
+  the highlighted turn changes. The sidebar's storage meter used to list the audio folder twice
+  on every redraw; the size is now measured only when audio is added or removed.
+- **The storage meter means something.** It was scaled to 12 MB from the original mockup, so
+  any real library read 100%. It now shows recordings against the space left on this Mac, and
+  the label switches to GB when it gets there.
+- **Library saves happen off the main thread.** A burst of edits becomes one write, and the
+  last one is flushed on quit. The library as it was at launch is kept as
+  `clips.backup.json`, and a library file that can't be read is moved aside instead of being
+  overwritten by an empty one.
+- **Dictation no longer wipes images or files from the clipboard.** Every clipboard item and
+  type is restored after the paste, not just plain text.
+- **Speaker suggestions survive a relaunch**, along with the ones you turned down. Naming or
+  reassigning a speaker clears its suggestion.
+- **With "Keep the audio" off, voices are still learned.** The audio is cleared once voice
+  matching has read it, instead of before.
+- Unfinished recordings from a crash or force quit no longer leave raw tracks behind.
+
+### Added
+
+- **Call-audio status on meetings.** If another app was playing audio during a recording but
+  none of it reached the call track, the meeting says so and links to the System Audio
+  Recording setting. Meetings that did record the call say "call audio recorded".
+- **A unit-test target** (`LoudFlowTests`) covering turn building, echo removal and Deepgram
+  decoding. It compiles the transcription code directly rather than launching the app, so it
+  never touches your library. Run it with `xcodebuild test -scheme LoudFlow`.
+
+### Changed
+
+- `Turn` and `Provider` moved into their own files so the tests can build without the app.
+- Replaced the deprecated `onChange(of:perform:)` calls and fixed a Sendable warning; the app
+  now builds with no warnings of its own.
+
 ## 1.7.0 — 2026-10-31 — design 5
 
 Transcription accuracy and speaker identification. Not a design update.

@@ -20,7 +20,7 @@ struct TwoColumn<L: View, R: View>: View {
             GeometryReader { g in
                 Color.clear
                     .onAppear { width = g.size.width }
-                    .onChange(of: g.size.width) { newValue in width = newValue }
+                    .onChange(of: g.size.width) { _, newValue in width = newValue }
             }
         )
     }

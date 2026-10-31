@@ -163,6 +163,40 @@ private struct ListViewportKey: PreferenceKey {
 
 // MARK: - Editor
 
+private struct PlaybackScrubber: View {
+    @ObservedObject var playback: PlaybackProgress
+    let clip: Clip
+    let seek: (Double) -> Void
+
+    var body: some View {
+        let fraction = playback.fraction(for: clip.id)
+        VStack(spacing: 1) {
+            Scrubber(fraction: fraction, onSeek: seek)
+            HStack {
+                Text(Clip.formatSeconds(Int((Double(clip.seconds) * fraction).rounded())))
+                Spacer()
+                Text(clip.durationLabel)
+            }
+            .font(Typo.font(11.5, 700))
+            .foregroundColor(Theme.creamMuted)
+        }
+    }
+}
+
+// Follows playback on every tick but hands the editor a new index only when it changes.
+private struct ActiveBlockTracker: View {
+    @ObservedObject var playback: PlaybackProgress
+    let current: () -> Int?
+    @Binding var active: Int?
+
+    var body: some View {
+        let index = current()
+        Color.clear
+            .onAppear { active = index }
+            .onChange(of: index) { _, new in active = new }
+    }
+}
+
 private struct EditorPane: View {
     @ObservedObject var model: AppModel
     let clip: Clip
@@ -175,6 +209,7 @@ private struct EditorPane: View {
     @State private var justCopied = false
     @State private var justSaved = false
     @State private var meetingTitle: String
+    @State private var activeIndex: Int?
     @FocusState private var titleFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -190,10 +225,6 @@ private struct EditorPane: View {
     }
 
     private var isPlaying: Bool { model.playingId == clip.id }
-    private var fraction: Double { model.progress(for: clip.id) }
-    private var elapsedLabel: String {
-        Clip.formatSeconds(Int((Double(clip.seconds) * fraction).rounded()))
-    }
     private var wordCount: Int {
         blocks.joined(separator: " ").split(whereSeparator: { $0 == " " || $0 == "\n" }).count
     }
@@ -210,6 +241,7 @@ private struct EditorPane: View {
         VStack(alignment: .leading, spacing: 16) {
             if clip.isConversation { meetingTitleField }
             metadata
+            if clip.isConversation && clip.callAudioMissed == true { callAudioStrip }
 
             if clip.audioDeleted {
                 retentionStrip
@@ -231,7 +263,7 @@ private struct EditorPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Theme.cream))
         .onAppear(perform: maybeFlash)
-        .onChange(of: model.editingTranscript) { editing in
+        .onChange(of: model.editingTranscript) { _, editing in
             if !editing && clip.isConversation { commitDraft() }
         }
         .onDisappear {
@@ -268,6 +300,7 @@ private struct EditorPane: View {
         HStack(spacing: 10) {
             Text(clip.timeLabel); Text("·"); Text(clip.durationLabel); Text("·")
             Text(clip.audioDeleted ? "transcript only" : clip.sizeLabel)
+            if clip.isConversation && clip.twoTrack { Text("·"); Text("call audio recorded") }
         }
         .font(Typo.font(12, 700))
         .tracking(0.04 * 12)
@@ -285,16 +318,7 @@ private struct EditorPane: View {
             .buttonStyle(PressFeedbackStyle())
             .clickable()
 
-            VStack(spacing: 1) {
-                Scrubber(fraction: fraction) { model.seek(clip, to: $0) }
-                HStack {
-                    Text(elapsedLabel)
-                    Spacer()
-                    Text(clip.durationLabel)
-                }
-                .font(Typo.font(11.5, 700))
-                .foregroundColor(Theme.creamMuted)
-            }
+            PlaybackScrubber(playback: model.playback, clip: clip) { model.seek(clip, to: $0) }
 
             Menu {
                 ForEach([Float(0.75), 1, 1.25, 1.5, 2], id: \.self) { rate in
@@ -323,6 +347,32 @@ private struct EditorPane: View {
 
     private func rateLabel(_ rate: Float) -> String {
         rate == 1 ? "1×" : "\(rate.formatted())×"
+    }
+
+    private var callAudioStrip: some View {
+        HStack(alignment: .top, spacing: 10) {
+            SolarIcon(name: Solar.info, size: 17, color: Theme.marigoldInk)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Call audio wasn't recorded")
+                    .font(Typo.font(12.5, 800))
+                    .foregroundColor(Theme.creamInk)
+                Text("If this was a call, LoudFlow only heard the other side through your mic, which makes voices harder to tell apart. Turn on LoudFlow under System Audio Recording Only, then record the next call.")
+                    .font(Typo.font(12, 400))
+                    .foregroundColor(Theme.creamBody)
+                    .lineSpacing(12 * 0.4)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { Permissions.openSystemAudioSettings() } label: {
+                    Text("Open Privacy & Security")
+                        .font(Typo.font(12, 800))
+                        .foregroundColor(Theme.link)
+                }
+                .buttonStyle(.plain)
+                .clickable()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 15).padding(.vertical, 13)
+        .background(RoundedRectangle(cornerRadius: Theme.Radius.editor).fill(Theme.creamChip))
     }
 
     private var retentionStrip: some View {
@@ -357,13 +407,14 @@ private struct EditorPane: View {
                         sentenceBlocks
                     }
                 }
-                .onChange(of: activeIndex) { index in
+                .onChange(of: activeIndex) { _, index in
                     guard let index, !model.editingTranscript else { return }
                     if reduceMotion { proxy.scrollTo(index, anchor: .center) }
                     else { withAnimation(Motion.page) { proxy.scrollTo(index, anchor: .center) } }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(ActiveBlockTracker(playback: model.playback, current: currentActiveIndex, active: $activeIndex))
             .padding(.horizontal, 12).padding(.vertical, 11)
             .background(RoundedRectangle(cornerRadius: Theme.Radius.editor).fill(flashBg))
             .overlay(
@@ -421,10 +472,10 @@ private struct EditorPane: View {
         )
     }
 
-    private var activeIndex: Int? {
+    private func currentActiveIndex() -> Int? {
         guard isPlaying else { return nil }
         if clip.isConversation { return model.activeTurnIndex(in: clip) }
-        let now = fraction * Double(clip.seconds)
+        let now = model.progress(for: clip.id) * Double(clip.seconds)
         return clip.sentenceRanges.lastIndex { $0.start <= now }
     }
 
